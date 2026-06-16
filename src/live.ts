@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { DOMParser } from "@xmldom/xmldom";
 import { performance } from "node:perf_hooks";
 import { OpenAI } from "openai";
 import { Anthropic } from "@anthropic-ai/sdk";
@@ -50,6 +51,22 @@ interface LiveResult {
   semanticOk: boolean;
   reconciliationOk: boolean;
   error?: string;
+}
+
+export function validateXmlSyntax(rawOutput: string): boolean {
+  try {
+    const parser = new DOMParser({
+      onError: (level, msg) => {
+        if (level === "error" || level === "fatalError") {
+          throw new Error(msg);
+        }
+      },
+    });
+    const xmlDoc = parser.parseFromString(rawOutput, "text/xml");
+    return !xmlDoc.getElementsByTagName("parsererror").length;
+  } catch {
+    return false;
+  }
 }
 
 export async function runLiveBenchmark() {
@@ -228,13 +245,7 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
 
         if (paradigm === "Raw XML / Flat OPC") {
           // Syntax: Valid XML parse check
-          try {
-            const parser = new globalThis.DOMParser();
-            const xmlDoc = parser.parseFromString(rawOutput, "text/xml");
-            syntaxOk = !xmlDoc.getElementsByTagName("parsererror").length;
-          } catch {
-            syntaxOk = false;
-          }
+          syntaxOk = validateXmlSyntax(rawOutput);
           // Semantics: Output XML should contain the replacement text
           semanticOk = rawOutput.includes(scenario.replacementText);
           reconciliationOk = syntaxOk;

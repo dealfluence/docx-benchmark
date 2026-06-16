@@ -20,32 +20,47 @@ This suite compares **Adeu** (a surgical XML patcher / Virtual DOM) against two 
 Ensure you have Node.js (>= 22.0.0) installed.
 
 ```bash
-# Install offline dependencies
+# Install dependencies
 npm install
 
-# Build the TypeScript compiler outputs
-npm run build
+# Set up your environment variables
+cp .env.example .env
 ```
+
+Open `.env` and fill in your API keys for the LLM providers you wish to test (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and/or `GEMINI_API_KEY`).
 
 ---
 
 ## Running the Benchmark
 
-You can run the offline simulation suite using the following commands:
+To execute the live benchmarking suite and run active document redlining scenarios against the configured LLMs:
 
 ```bash
-# Execute the benchmark CLI
+# Run the live API benchmark suite
+npm run benchmark:live
+```
+
+The live benchmark will automatically build the codebase, detect which provider keys are present in your environment, send requests to those APIs using the different baseline paradigms, and measure actual output latency, token usage, financial cost, and result fidelity.
+
+---
+
+## Quality Control & Development
+
+The offline simulation suite, unit tests, and other development checks are used for local validation, cost-free testing, and quality control:
+
+```bash
+# Run the local offline simulation suite
 node dist/index.js
 
 # Run the Vitest unit testing suite
 npm run test
 
-# Run linter and prettier checks
+# Run code linter
 npm run lint
+
+# Run prettier code formatter
 npm run format
 ```
-
----
 
 ## Simulation Results
 
