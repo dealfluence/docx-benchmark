@@ -32,7 +32,7 @@ const COST_RATES = {
     outRate: 4.0 / 1000000, // $4.00 per million
   },
   gemini: {
-    model: "gemini-1.5-flash",
+    model: "gemini-3.5-flash",
     inRate: 0.075 / 1000000, // $0.075 per million
     outRate: 0.3 / 1000000, // $0.30 per million
   },
@@ -132,8 +132,8 @@ export async function runLiveBenchmark() {
       ];
 
       for (const paradigm of paradigms) {
-        console.log(
-          `Running: \x1b[32m${provider}\x1b[0m | \x1b[36m${scenario.id}\x1b[0m | \x1b[35m${paradigm}\x1b[0m...`,
+        process.stdout.write(
+          `Running: \x1b[32m${provider}\x1b[0m | \x1b[36m${scenario.id}\x1b[0m | \x1b[35m${paradigm}\x1b[0m... `,
         );
 
         // Load document fresh for each run to avoid side effects
@@ -233,6 +233,7 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
             reconciliationOk: false,
             error: apiError,
           });
+          process.stdout.write(`\x1b[31m[ERROR: ${apiError}]\x1b[0m\n`);
           continue;
         }
 
@@ -312,6 +313,15 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
           semanticOk,
           reconciliationOk,
         });
+
+        const latencySec = (latencyMs / 1000).toFixed(2);
+        const syntaxStatus = syntaxOk ? "🟢 OK" : "🔴 FAIL";
+        const semanticStatus = semanticOk ? "🟢 OK" : "🔴 FAIL";
+        const reconciliationStatus = reconciliationOk ? "🟢 OK" : "🔴 FAIL";
+
+        process.stdout.write(
+          `\x1b[32m[DONE]\x1b[0m in ${latencySec}s | Cost: $${cost.toFixed(6)} | Syntax: ${syntaxStatus} | Semantics: ${semanticStatus} | Recon: ${reconciliationStatus}\n`
+        );
       }
     }
   }
