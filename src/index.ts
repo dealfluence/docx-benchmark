@@ -20,7 +20,6 @@ export async function main() {
       "Tokens In": r.tokensIn,
       "Tokens Out": r.tokensOut,
       Total: r.totalTokens,
-      "Cost ($)": `$${r.cost.toFixed(6)}`,
       Fidelity: `${r.fidelity}%`,
       "XML Integrity": r.xmlIntegrity === "PASS" ? "🟢 PASS" : "🔴 FAIL",
     }));
@@ -38,14 +37,14 @@ export async function main() {
 
       console.log(`### ${sName}`);
       console.log(
-        `| Baseline Paradigm | Tokenizer | Input Tokens | Output Tokens | Total Tokens | Estimated Cost | Fidelity Score | XML Schema Integrity |`,
+        `| Baseline Paradigm | Tokenizer | Input Tokens | Output Tokens | Total Tokens | Fidelity Score | XML Schema Integrity |`,
       );
-      console.log(`| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |`);
+      console.log(`| :--- | :--- | :---: | :---: | :---: | :---: | :---: |`);
 
       for (const r of sResults) {
         const integrityEmoji = r.xmlIntegrity === "PASS" ? "✅ PASS" : "❌ FAIL";
         console.log(
-          `| **${r.baselineName}** | \`${r.tokenizer}\` | ${r.tokensIn.toLocaleString()} | ${r.tokensOut.toLocaleString()} | ${r.totalTokens.toLocaleString()} | $${r.cost.toFixed(6)} | ${r.fidelity}% | ${integrityEmoji} |`,
+          `| **${r.baselineName}** | \`${r.tokenizer}\` | ${r.tokensIn.toLocaleString()} | ${r.tokensOut.toLocaleString()} | ${r.totalTokens.toLocaleString()} | ${r.fidelity}% | ${integrityEmoji} |`,
         );
       }
       console.log(`\n`);

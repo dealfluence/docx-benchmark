@@ -9,7 +9,7 @@ import { DocumentObject, DocumentMapper, RedlineEngine } from "@adeu/core";
 import { getGoldenDocxPath } from "./baselines.js";
 import { scenarios } from "./scenarios.js";
 import { XML_SYSTEM_PROMPT, MD_SYSTEM_PROMPT, ADEU_SYSTEM_PROMPT } from "./baselines.js";
-import { evaluateFidelity } from "./fidelity.js";
+import { evaluateFidelity, createStrippedDoc, createXmlReconstructedDoc } from "./fidelity.js";
 
 // Load .env file programmatically (supported natively in Node.js >= 20.12.0 and Node 22)
 try {
@@ -20,22 +20,15 @@ try {
   // Graceful fallback if not supported on old runtimes
 }
 
-// Constants for cost calculation
-const COST_RATES = {
+const PROVIDER_CONFIGS = {
   openai: {
     model: "gpt-4o-mini",
-    inRate: 0.15 / 1000000, // $0.15 per million
-    outRate: 0.6 / 1000000, // $0.60 per million
   },
   anthropic: {
     model: "claude-3-5-haiku-20241022",
-    inRate: 0.8 / 1000000, // $0.80 per million
-    outRate: 4.0 / 1000000, // $4.00 per million
   },
   gemini: {
-    model: "gemini-3.5-flash",
-    inRate: 0.075 / 1000000, // $0.075 per million
-    outRate: 0.3 / 1000000, // $0.30 per million
+    model: "gemini-3.5-flash", // Reverted back to gemini-3.5-flash
   },
 };
 
@@ -47,7 +40,7 @@ interface LiveResult {
   latencyMs: number;
   tokensIn: number;
   tokensOut: number;
-  cost: number;
+  totalTokens: number;
   syntaxOk: boolean;
   semanticOk: boolean;
   reconciliationOk: boolean;
@@ -87,21 +80,21 @@ export async function runLiveBenchmark() {
     clients.push({
       provider: "OpenAI",
       client: new OpenAI({ apiKey: openaiKey }),
-      modelConfig: COST_RATES.openai,
+      modelConfig: PROVIDER_CONFIGS.openai,
     });
   }
   if (anthropicKey) {
     clients.push({
       provider: "Anthropic",
       client: new Anthropic({ apiKey: anthropicKey }),
-      modelConfig: COST_RATES.anthropic,
+      modelConfig: PROVIDER_CONFIGS.anthropic,
     });
   }
   if (geminiKey) {
     clients.push({
       provider: "Gemini",
       client: new GoogleGenerativeAI(geminiKey),
-      modelConfig: COST_RATES.gemini,
+      modelConfig: PROVIDER_CONFIGS.gemini,
     });
   }
 
@@ -230,7 +223,7 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
             latencyMs,
             tokensIn: 0,
             tokensOut: 0,
-            cost: 0,
+            totalTokens: 0,
             syntaxOk: false,
             semanticOk: false,
             reconciliationOk: false,
@@ -254,19 +247,49 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
           syntaxOk = validateXmlSyntax(rawOutput);
           // Semantics: Output XML should contain the replacement text
           semanticOk = rawOutput.includes(scenario.replacementText);
-          reconciliationOk = syntaxOk;
-          fidelity = syntaxOk ? 100 : 0;
+          if (syntaxOk) {
+            try {
+              // Reconstruct the XML into a test-ready DocumentObject structure using buffer
+              const reconstructedDoc = await createXmlReconstructedDoc(buffer, rawOutput);
+              reconciliationOk = true;
+
+              // Programmatically inspect styles, comment schemas, and header elements
+              const fidelityResult = evaluateFidelity(originalDoc, reconstructedDoc, scenario.id);
+              fidelity = fidelityResult.score;
+            } catch {
+              reconciliationOk = false;
+              fidelity = 0;
+            }
+          } else {
+            reconciliationOk = false;
+            fidelity = 0;
+          }
         } else if (paradigm === "Naïve Markdown") {
           syntaxOk = rawOutput.length > 0;
-          // Semantics: Output text should contain the replacement text
           semanticOk = rawOutput.includes(scenario.replacementText);
-          reconciliationOk = true;
-          fidelity = 30;
+          if (syntaxOk) {
+            try {
+              // Simulates actual Markdown-to-DOCX conversion loss dynamically using buffer
+              const strippedDoc = await createStrippedDoc(buffer, rawOutput);
+              reconciliationOk = true;
+
+              // Run calculated package properties evaluation
+              const fidelityResult = evaluateFidelity(originalDoc, strippedDoc, scenario.id);
+              fidelity = fidelityResult.score;
+            } catch {
+              reconciliationOk = false;
+              fidelity = 0;
+            }
+          } else {
+            reconciliationOk = false;
+            fidelity = 0;
+          }
         } else {
+          // Adeu Virtual DOM surgical batch patching
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           let parsedJSON: any = null;
           try {
-            // Strip markdown block formatting if model wrapped JSON in ```json
+            // Strip markdown blocks if models wrap JSON array
             let cleanJSON = rawOutput.trim();
             if (cleanJSON.startsWith("```json")) {
               cleanJSON = cleanJSON.slice(7);
@@ -284,7 +307,6 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
           }
 
           if (syntaxOk && parsedJSON) {
-            // Reconcile changes dynamically via Adeu Core
             try {
               const engine = new RedlineEngine(doc);
               engine.process_batch(parsedJSON);
@@ -297,10 +319,10 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
               } else if (scenario.id === "clause-drafting") {
                 semanticOk = finalPlain.includes("Data Protection");
               } else {
-                semanticOk = true; // Accepted tracks don't change plain content text in this scenario directly
+                semanticOk = true; // Review operations accepted successfully
               }
 
-              // Programmatically evaluate fidelity
+              // Programmatically evaluate fidelity on surgically patched DocumentObject
               const fidelityResult = evaluateFidelity(originalDoc, doc, scenario.id);
               fidelity = fidelityResult.score;
             } catch {
@@ -308,8 +330,6 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
             }
           }
         }
-
-        const cost = tokensIn * modelConfig.inRate + tokensOut * modelConfig.outRate;
 
         results.push({
           provider,
@@ -319,7 +339,7 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
           latencyMs,
           tokensIn,
           tokensOut,
-          cost,
+          totalTokens: tokensIn + tokensOut,
           syntaxOk,
           semanticOk,
           reconciliationOk,
@@ -332,7 +352,7 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
         const reconciliationStatus = reconciliationOk ? "🟢 OK" : "🔴 FAIL";
 
         process.stdout.write(
-          `\x1b[32m[DONE]\x1b[0m in ${latencySec}s | Cost: $${cost.toFixed(6)} | Syntax: ${syntaxStatus} | Semantics: ${semanticStatus} | Recon: ${reconciliationStatus}\n`,
+          `\x1b[32m[DONE]\x1b[0m in ${latencySec}s | Tokens: In=${tokensIn}, Out=${tokensOut} | Syntax: ${syntaxStatus} | Semantics: ${semanticStatus} | Recon: ${reconciliationStatus}\n`,
         );
       }
     }
@@ -352,7 +372,7 @@ function printLiveReport(results: LiveResult[]) {
     "Latency (s)": (r.latencyMs / 1000).toFixed(2),
     "Tokens In": r.tokensIn,
     "Tokens Out": r.tokensOut,
-    "Cost ($)": `$${r.cost.toFixed(6)}`,
+    Total: r.totalTokens,
     Syntax: r.syntaxOk ? "🟢 OK" : "🔴 FAIL",
     Semantics: r.semanticOk ? "🟢 OK" : "🔴 FAIL",
     Reconciliation: r.reconciliationOk ? "🟢 OK" : "🔴 FAIL",
@@ -368,7 +388,7 @@ function printLiveReport(results: LiveResult[]) {
   const providerNames = Array.from(new Set(results.map((r) => r.provider)));
   for (const provider of providerNames) {
     md += `## Provider: ${provider} (${results.find((r) => r.provider === provider)?.model})\n\n`;
-    md += `| Scenario | Processing Paradigm | Latency (s) | Input Tokens | Output Tokens | Exact Cost | Syntax Valid | Edit Correct | Structural Integrity | Fidelity Score |\n`;
+    md += `| Scenario | Processing Paradigm | Latency (s) | Input Tokens | Output Tokens | Total Tokens | Syntax Valid | Edit Correct | Structural Integrity | Fidelity Score |\n`;
     md += `| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
 
     const pResults = results.filter((r) => r.provider === provider);
@@ -378,7 +398,7 @@ function printLiveReport(results: LiveResult[]) {
       const reconVal = r.reconciliationOk ? "✅ PASS" : "❌ FAIL";
       const latencyStr = (r.latencyMs / 1000).toFixed(2);
 
-      md += `| ${r.scenarioId} | **${r.paradigm}** | ${latencyStr}s | ${r.tokensIn.toLocaleString()} | ${r.tokensOut.toLocaleString()} | $${r.cost.toFixed(6)} | ${syntaxVal} | ${semanticVal} | ${reconVal} | ${r.fidelity}% |\n`;
+      md += `| ${r.scenarioId} | **${r.paradigm}** | ${latencyStr}s | ${r.tokensIn.toLocaleString()} | ${r.tokensOut.toLocaleString()} | ${r.totalTokens.toLocaleString()} | ${syntaxVal} | ${semanticVal} | ${reconVal} | ${r.fidelity}% |\n`;
     }
     md += `\n`;
   }

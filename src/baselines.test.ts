@@ -17,7 +17,6 @@ describe("baselines simulation", () => {
     expect(first).toHaveProperty("tokensIn");
     expect(first).toHaveProperty("tokensOut");
     expect(first).toHaveProperty("totalTokens");
-    expect(first).toHaveProperty("cost");
     expect(first).toHaveProperty("fidelity");
     expect(first).toHaveProperty("xmlIntegrity");
 
@@ -26,7 +25,6 @@ describe("baselines simulation", () => {
       expect(r.tokensIn).toBeGreaterThan(0);
       expect(r.tokensOut).toBeGreaterThan(0);
       expect(r.totalTokens).toBe(r.tokensIn + r.tokensOut);
-      expect(r.cost).toBeGreaterThan(0);
       expect(r.fidelity).toBeGreaterThanOrEqual(0);
       expect(r.fidelity).toBeLessThanOrEqual(100);
       expect(["PASS", "FAIL"]).toContain(r.xmlIntegrity);
