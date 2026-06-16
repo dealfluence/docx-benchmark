@@ -9,6 +9,7 @@ import { DocumentObject, DocumentMapper, RedlineEngine } from "@adeu/core";
 import { getGoldenDocxPath } from "./baselines.js";
 import { scenarios } from "./scenarios.js";
 import { XML_SYSTEM_PROMPT, MD_SYSTEM_PROMPT, ADEU_SYSTEM_PROMPT } from "./baselines.js";
+import { evaluateFidelity } from "./fidelity.js";
 
 // Load .env file programmatically (supported natively in Node.js >= 20.12.0 and Node 22)
 try {
@@ -50,6 +51,7 @@ interface LiveResult {
   syntaxOk: boolean;
   semanticOk: boolean;
   reconciliationOk: boolean;
+  fidelity: number;
   error?: string;
 }
 
@@ -138,6 +140,7 @@ export async function runLiveBenchmark() {
 
         // Load document fresh for each run to avoid side effects
         const doc = await DocumentObject.load(buffer);
+        const originalDoc = await DocumentObject.load(buffer);
         let systemPrompt = "";
         let documentContent = "";
         let userInstruction = "";
@@ -231,6 +234,7 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
             syntaxOk: false,
             semanticOk: false,
             reconciliationOk: false,
+            fidelity: 0,
             error: apiError,
           });
           process.stdout.write(`\x1b[31m[ERROR: ${apiError}]\x1b[0m\n`);
@@ -243,6 +247,7 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
         let syntaxOk = false;
         let semanticOk = false;
         let reconciliationOk = false;
+        let fidelity = 0;
 
         if (paradigm === "Raw XML / Flat OPC") {
           // Syntax: Valid XML parse check
@@ -250,11 +255,13 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
           // Semantics: Output XML should contain the replacement text
           semanticOk = rawOutput.includes(scenario.replacementText);
           reconciliationOk = syntaxOk;
+          fidelity = syntaxOk ? 100 : 0;
         } else if (paradigm === "Naïve Markdown") {
           syntaxOk = rawOutput.length > 0;
           // Semantics: Output text should contain the replacement text
           semanticOk = rawOutput.includes(scenario.replacementText);
           reconciliationOk = true;
+          fidelity = 30;
         } else {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           let parsedJSON: any = null;
@@ -292,6 +299,10 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
               } else {
                 semanticOk = true; // Accepted tracks don't change plain content text in this scenario directly
               }
+
+              // Programmatically evaluate fidelity
+              const fidelityResult = evaluateFidelity(originalDoc, doc, scenario.id);
+              fidelity = fidelityResult.score;
             } catch {
               reconciliationOk = false;
             }
@@ -312,6 +323,7 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
           syntaxOk,
           semanticOk,
           reconciliationOk,
+          fidelity,
         });
 
         const latencySec = (latencyMs / 1000).toFixed(2);
@@ -320,7 +332,7 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
         const reconciliationStatus = reconciliationOk ? "🟢 OK" : "🔴 FAIL";
 
         process.stdout.write(
-          `\x1b[32m[DONE]\x1b[0m in ${latencySec}s | Cost: $${cost.toFixed(6)} | Syntax: ${syntaxStatus} | Semantics: ${semanticStatus} | Recon: ${reconciliationStatus}\n`
+          `\x1b[32m[DONE]\x1b[0m in ${latencySec}s | Cost: $${cost.toFixed(6)} | Syntax: ${syntaxStatus} | Semantics: ${semanticStatus} | Recon: ${reconciliationStatus}\n`,
         );
       }
     }
@@ -344,6 +356,7 @@ function printLiveReport(results: LiveResult[]) {
     Syntax: r.syntaxOk ? "🟢 OK" : "🔴 FAIL",
     Semantics: r.semanticOk ? "🟢 OK" : "🔴 FAIL",
     Reconciliation: r.reconciliationOk ? "🟢 OK" : "🔴 FAIL",
+    Fidelity: `${r.fidelity}%`,
     Status: r.error ? `🔴 API Error: ${r.error.slice(0, 30)}` : "🟢 Success",
   }));
   console.table(tableRows);
@@ -355,8 +368,8 @@ function printLiveReport(results: LiveResult[]) {
   const providerNames = Array.from(new Set(results.map((r) => r.provider)));
   for (const provider of providerNames) {
     md += `## Provider: ${provider} (${results.find((r) => r.provider === provider)?.model})\n\n`;
-    md += `| Scenario | Processing Paradigm | Latency (s) | Input Tokens | Output Tokens | Exact Cost | Syntax Valid | Edit Correct | Structural Integrity |\n`;
-    md += `| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
+    md += `| Scenario | Processing Paradigm | Latency (s) | Input Tokens | Output Tokens | Exact Cost | Syntax Valid | Edit Correct | Structural Integrity | Fidelity Score |\n`;
+    md += `| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
 
     const pResults = results.filter((r) => r.provider === provider);
     for (const r of pResults) {
@@ -365,7 +378,7 @@ function printLiveReport(results: LiveResult[]) {
       const reconVal = r.reconciliationOk ? "✅ PASS" : "❌ FAIL";
       const latencyStr = (r.latencyMs / 1000).toFixed(2);
 
-      md += `| ${r.scenarioId} | **${r.paradigm}** | ${latencyStr}s | ${r.tokensIn.toLocaleString()} | ${r.tokensOut.toLocaleString()} | $${r.cost.toFixed(6)} | ${syntaxVal} | ${semanticVal} | ${reconVal} |\n`;
+      md += `| ${r.scenarioId} | **${r.paradigm}** | ${latencyStr}s | ${r.tokensIn.toLocaleString()} | ${r.tokensOut.toLocaleString()} | $${r.cost.toFixed(6)} | ${syntaxVal} | ${semanticVal} | ${reconVal} | ${r.fidelity}% |\n`;
     }
     md += `\n`;
   }
