@@ -5,14 +5,14 @@ export async function main() {
   try {
     const docPath = getGoldenDocxPath();
     console.log(
-      `\n\x1b[1m\x1b[34m[Adeu Benchmark Suite]\x1b[0m Running offline simulation using document:`,
+      `\n\x1b[1m\x1b[34m[Adeu Offline Token Estimates]\x1b[0m Running offline simulation using document:`,
     );
     console.log(`  -> ${docPath}\n`);
 
     const results = await runSimulation(docPath);
 
     // 1. Color-coded console.table output
-    console.log(`\x1b[1m\x1b[32m=== CONSOLE SUMMARY ===\x1b[0m`);
+    console.log(`\x1b[1m\x1b[32m=== Illustrative Token Estimates (offline, no model calls — not a benchmark) ===\x1b[0m`);
     const consoleRows = results.map((r) => ({
       Scenario: r.scenarioId,
       "Baseline Model": r.baselineName,
@@ -20,13 +20,14 @@ export async function main() {
       "Tokens In": r.tokensIn,
       "Tokens Out": r.tokensOut,
       Total: r.totalTokens,
-      Fidelity: `${r.fidelity}%`,
-      "XML Integrity": r.xmlIntegrity === "PASS" ? "🟢 PASS" : "🔴 FAIL",
+      "Est. Cost": r.cost,
+      Fidelity: r.fidelity,
+      "XML Integrity": r.xmlIntegrity,
     }));
     console.table(consoleRows);
 
-    // 2. Markdown tables for README.md grouped by Scenario
-    console.log(`\n\x1b[1m\x1b[32m=== MARKDOWN REPORT FOR README.MD ===\x1b[0m\n`);
+    // 2. Markdown tables for stdout
+    console.log(`\n\x1b[1m\x1b[32m=== OFFLINE ESTIMATES REPORT ===\x1b[0m\n`);
 
     // Group scenarios
     const scenarioIds = Array.from(new Set(results.map((r) => r.scenarioId)));
@@ -37,21 +38,20 @@ export async function main() {
 
       console.log(`### ${sName}`);
       console.log(
-        `| Baseline Paradigm | Tokenizer | Input Tokens | Output Tokens | Total Tokens | Fidelity Score | XML Schema Integrity |`,
+        `| Baseline Paradigm | Tokenizer | Input Tokens | Output Tokens | Total Tokens | Estimated Cost | Fidelity Score | XML Schema Integrity |`,
       );
-      console.log(`| :--- | :--- | :---: | :---: | :---: | :---: | :---: |`);
+      console.log(`| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |`);
 
       for (const r of sResults) {
-        const integrityEmoji = r.xmlIntegrity === "PASS" ? "✅ PASS" : "❌ FAIL";
         console.log(
-          `| **${r.baselineName}** | \`${r.tokenizer}\` | ${r.tokensIn.toLocaleString()} | ${r.tokensOut.toLocaleString()} | ${r.totalTokens.toLocaleString()} | ${r.fidelity}% | ${integrityEmoji} |`,
+          `| **${r.baselineName}** | \`${r.tokenizer}\` | ${r.tokensIn.toLocaleString()} | ${r.tokensOut} | ${r.totalTokens} | ${r.cost} | ${r.fidelity} | ${r.xmlIntegrity} |`,
         );
       }
       console.log(`\n`);
     }
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error(`\x1b[31m[Error running benchmark]: ${msg}\x1b[0m`);
+    console.error(`\x1b[31m[Error running offline simulation]: ${msg}\x1b[0m`);
     process.exit(1);
   }
 }

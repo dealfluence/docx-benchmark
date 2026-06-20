@@ -49,3 +49,10 @@ html/
 
 # TypeScript
 tsconfig.tsbuildinfo
+
+# Temporary files and results JSON
+temp_*
+/results/
+/live_benchmark_results.json
+/live_benchmark_results.md
+AI_SESSION.md

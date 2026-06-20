@@ -7,6 +7,7 @@ import {
   getPartContent,
   extractStyleIds,
   hasHeaderOrFooter,
+  calculateXmlDelta,
 } from "./fidelity.js";
 
 describe("fidelity checks", () => {
@@ -40,5 +41,16 @@ describe("fidelity checks", () => {
     expect(report.commentsPreserved).toBe(true);
     expect(report.trackChangesPreserved).toBe(true);
     expect(report.score).toBe(100);
+    expect(report.xmlDelta).toBe(0);
+  });
+
+  it("should return 0 xmlDelta when original and modified XML strings are identical", () => {
+    const delta = calculateXmlDelta("<w:p>test</w:p>", "<w:p>test</w:p>");
+    expect(delta).toBe(0);
+  });
+
+  it("should calculate exact character differences for surgical tag edits", () => {
+    const delta = calculateXmlDelta("<w:p>hello</w:p>", "<w:p>world</w:p>");
+    expect(delta).toBeGreaterThan(0);
   });
 });

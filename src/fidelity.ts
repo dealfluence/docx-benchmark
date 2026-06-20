@@ -7,6 +7,7 @@ export interface FidelityReport {
   commentsPreserved: boolean;
   trackChangesPreserved: boolean;
   score: number;
+  xmlDelta: number;
 }
 
 /**
@@ -109,6 +110,7 @@ export function evaluateFidelity(
   // 4. Tracked Changes Check
   const origDocXml = originalDoc.part.blob;
   const modDocXml = modifiedDoc.part.blob;
+  const xmlDelta = calculateXmlDelta(origDocXml, modDocXml);
   const origIns = (origDocXml.match(/<w:ins\s/g) || []).length;
   const origDel = (origDocXml.match(/<w:del\s/g) || []).length;
   const modIns = (modDocXml.match(/<w:ins\s/g) || []).length;
@@ -141,6 +143,7 @@ export function evaluateFidelity(
     commentsPreserved,
     trackChangesPreserved,
     score,
+    xmlDelta,
   };
 }
 
@@ -169,10 +172,15 @@ export async function createStrippedDoc(
     }
   }
 
+  const parser = new DOMParser();
+
   // Replace word/styles.xml with empty styles container to represent formatting loss
   const stylesPart = docCopy.pkg.parts.find((p) => p.partname.endsWith("styles.xml"));
   if (stylesPart) {
-    stylesPart.blob = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"></w:styles>`;
+    const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"></w:styles>`;
+    stylesPart.blob = stylesXml;
+    const parsedStyles = parser.parseFromString(stylesXml, "text/xml");
+    stylesPart._element = parsedStyles.documentElement as unknown as Element;
   }
 
   // Inject reconstructed unstyled body paragraphs
@@ -180,9 +188,74 @@ export async function createStrippedDoc(
     const cleanPara = para.replace(/</g, "&lt;").replace(/>/g, "&gt;");
     return `<w:p><w:r><w:t>${cleanPara}</w:t></w:r></w:p>`;
   });
-  docCopy.part.blob = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paragraphXmls.join("")}</w:body></w:document>`;
+  const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paragraphXmls.join("")}</w:body></w:document>`;
+  docCopy.part.blob = docXml;
+  const parsedDoc = parser.parseFromString(docXml, "text/xml");
+  docCopy.part._element = parsedDoc.documentElement as unknown as Element;
 
   return docCopy;
+}
+
+/**
+ * Calculates the edit distance delta between original and modified XML strings by tag boundaries.
+ */
+export function calculateXmlDelta(originalXml: string, modifiedXml: string): number {
+  if (!originalXml || !modifiedXml) return Math.abs((originalXml || "").length - (modifiedXml || "").length);
+  
+  const oXml = originalXml.replace(/\r\n/g, "\n");
+  const mXml = modifiedXml.replace(/\r\n/g, "\n");
+
+  if (oXml === mXml) return 0;
+
+  // Split at closing XML tags to prevent single-line DP bloat
+  const oLines = oXml.replace(/>/g, ">\n").split("\n").map(l => l.trim()).filter(Boolean);
+  const mLines = mXml.replace(/>/g, ">\n").split("\n").map(l => l.trim()).filter(Boolean);
+
+  const N = oLines.length;
+  const M = mLines.length;
+
+  // Guard against excessive memory usage for large files
+  if (N > 4000 || M > 4000) {
+    let matchingChars = 0;
+    const limit = Math.min(oXml.length, mXml.length);
+    for (let i = 0; i < limit; i++) {
+      if (oXml[i] === mXml[i]) matchingChars++;
+    }
+    return (oXml.length - matchingChars) + (mXml.length - matchingChars);
+  }
+
+  const dp: number[][] = Array.from({ length: N + 1 }, () => Array(M + 1).fill(0));
+  for (let i = 1; i <= N; i++) {
+    for (let j = 1; j <= M; j++) {
+      if (oLines[i - 1] === mLines[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  const deleted: string[] = [];
+  const added: string[] = [];
+  let i = N;
+  let j = M;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oLines[i - 1] === mLines[j - 1]) {
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      added.push(mLines[j - 1]);
+      j--;
+    } else {
+      deleted.push(oLines[i - 1]);
+      i--;
+    }
+  }
+
+  let charDiff = 0;
+  for (const line of deleted) charDiff += line.length;
+  for (const line of added) charDiff += line.length;
+  return charDiff;
 }
 
 /**
@@ -194,5 +267,8 @@ export async function createXmlReconstructedDoc(
 ): Promise<DocumentObject> {
   const docCopy = await DocumentObject.load(originalBuffer);
   docCopy.part.blob = updatedXml;
+  const parser = new DOMParser();
+  const parsedDoc = parser.parseFromString(updatedXml, "text/xml");
+  docCopy.part._element = parsedDoc.documentElement as unknown as Element;
   return docCopy;
 }
