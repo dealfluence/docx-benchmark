@@ -61,11 +61,40 @@ export interface Schema {
   required?: string[];
   items?: Schema;
   description?: string;
+  enum?: string[];
 }
 
 export function mapSchemaType(type: string): SchemaType {
   return (SchemaType as unknown as Record<string, SchemaType>)[type.toUpperCase()] || SchemaType.STRING;
 }
+
+const ChangesItemsSchema: Schema = {
+  type: "object",
+  properties: {
+    type: {
+      type: "string",
+      description: "The type of change: 'modify' (search-and-replace), 'accept' (finalize track change), 'reject' (revert track change), or 'reply' (reply to comment).",
+      enum: ["modify", "accept", "reject", "reply"],
+    },
+    target_text: {
+      type: "string",
+      description: "For 'modify': the unique text/phrase in the original document to replace.",
+    },
+    new_text: {
+      type: "string",
+      description: "For 'modify': the new markdown-formatted text to insert.",
+    },
+    target_id: {
+      type: "string",
+      description: "For 'accept', 'reject', or 'reply': the target change ID (Chg:N) or comment ID (Com:N).",
+    },
+    text: {
+      type: "string",
+      description: "For 'reply': the text content of the reply.",
+    },
+  },
+  required: ["type"],
+};
 
 /**
  * Normalizes tool schemas to conform with Google Gemini's uppercase SchemaType limitations
@@ -128,5 +157,15 @@ export function cleanSchema(schema: Schema | undefined): Schema | undefined {
   if (schema.items) {
     res.items = cleanSchema(schema.items);
   }
+
+  // Supply default items schema for array properties that do not have them
+  if (res.type === SchemaType.ARRAY && !res.items) {
+    if (res.description?.includes("List of changes")) {
+      res.items = cleanSchema(ChangesItemsSchema);
+    } else {
+      res.items = { type: SchemaType.STRING };
+    }
+  }
+
   return res;
 }

@@ -124,7 +124,6 @@ export function printLiveConsoleSummary(summaries: LiveTrialSummary[], reps: num
         isSafe,
         false,
       ),
-      Cost: "UNKNOWN",
       Latency: `${(s.latency.mean / 1000).toFixed(1)}s [${(s.latency.min / 1000).toFixed(1)}-${(s.latency.max / 1000).toFixed(1)}]`,
     };
   });
@@ -165,8 +164,8 @@ export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: numbe
   for (const sId of scenariosGrouped) {
     const sResults = summaries.filter((s) => s.scenarioId === sId);
     md += `### Scenario: ${sResults[0]?.scenarioName} (\`${sId}\`)\n\n`;
-    md += `| Paradigm | Doc Size | Success Rate | XML Delta (Surgicality) | Fidelity Score (Avg [Min-Max]) | XML Integrity | Round Trips (Avg) | Turns to Success (Avg) | Recovery Rate (Avg) | Input Tokens (Avg [Min-Max]) | Output Tokens (Avg [Min-Max]) | Total Tokens (Avg [Min-Max]) | Cost (Avg [Min-Max]) | Latency (Avg [Min-Max]) |\n`;
-    md += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
+    md += `| Paradigm | Doc Size | Success Rate | XML Delta (Surgicality) | Fidelity Score (Avg [Min-Max]) | XML Integrity | Round Trips (Avg) | Turns to Success (Avg) | Recovery Rate (Avg) | Input Tokens (Avg [Min-Max]) | Output Tokens (Avg [Min-Max]) | Total Tokens (Avg [Min-Max]) | Latency (Avg [Min-Max]) |\n`;
+    md += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
 
     for (const s of sResults) {
       const isSafe = s.paradigm === "safe-docx";
@@ -181,7 +180,7 @@ export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: numbe
         `${formatTokenMetric(s.tokensIn, s.newContentTokens, isSafe, true)} | ` +
         `${Math.round(s.tokensOut.mean).toLocaleString()} [${Math.round(s.tokensOut.min).toLocaleString()}-${Math.round(s.tokensOut.max).toLocaleString()}] | ` +
         `${formatTokenMetric(s.totalTokens, totalFloorStats, isSafe, true)} | ` +
-        `UNKNOWN | ${(s.latency.mean / 1000).toFixed(1)}s [${(s.latency.min / 1000).toFixed(1)}-${(s.latency.max / 1000).toFixed(1)}] |\n`;
+        `${(s.latency.mean / 1000).toFixed(1)}s [${(s.latency.min / 1000).toFixed(1)}-${(s.latency.max / 1000).toFixed(1)}] |\n`;
     }
     md += `\n`;
   }
