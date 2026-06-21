@@ -197,6 +197,12 @@ interface SingleTrialRun {
   error?: string;
 }
 
+interface Stats {
+  mean: number;
+  min: number;
+  max: number;
+}
+
 export interface LiveTrialSummary {
   provider: string;
   model: string;
@@ -206,38 +212,20 @@ export interface LiveTrialSummary {
   docSize: "small" | "large";
   supported: boolean;
   reps: number;
-  latencyMeanMs: number;
-  latencyMinMs: number;
-  latencyMaxMs: number;
-  tokensInMean: number;
-  tokensInMin: number;
-  tokensInMax: number;
-  tokensOutMean: number;
-  tokensOutMin: number;
-  tokensOutMax: number;
-  totalTokensMean: number;
-  totalTokensMin: number;
-  totalTokensMax: number;
-  xmlDeltaMean: number;
-  xmlDeltaMin: number;
-  xmlDeltaMax: number;
+  latency: Stats;
+  tokensIn: Stats;
+  tokensOut: Stats;
+  totalTokens: Stats;
+  xmlDelta: Stats;
   xmlIntegrityRate: string;
-  fidelityMean: number;
-  fidelityMin: number;
-  fidelityMax: number;
+  fidelity: Stats;
   successRate: string;
-  roundTripsMean: number;
-  turnsToSuccessMean: number;
-  recoveryRateMean: number;
-  schemaTokensMean?: number;
-  schemaTokensMin?: number;
-  schemaTokensMax?: number;
-  historyTokensMean?: number;
-  historyTokensMin?: number;
-  historyTokensMax?: number;
-  newContentTokensMean?: number;
-  newContentTokensMin?: number;
-  newContentTokensMax?: number;
+  roundTrips: Stats;
+  turnsToSuccess: Stats;
+  recoveryRate: Stats;
+  schemaTokens?: Stats;
+  historyTokens?: Stats;
+  newContentTokens?: Stats;
 }
 
 // Helper to convert lowercase string types to Gemini uppercase SchemaType
@@ -300,7 +288,7 @@ export function cleanSchema(schema: any): any {
   return res;
 }
 
-function getStats(arr: number[]) {
+function getStats(arr: number[]): Stats {
   const sum = arr.reduce((a, b) => a + b, 0);
   return {
     mean: sum / (arr.length || 1),
@@ -322,12 +310,8 @@ function getFullTaskDescription(scenario: any): string {
 }
 
 function formatTokenMetric(
-  mean: number,
-  min: number,
-  max: number,
-  floorMean?: number,
-  floorMin?: number,
-  floorMax?: number,
+  metric: Stats,
+  floorMetric?: Stats,
   isSafeDocx = false,
   useLocale = false,
 ): string {
@@ -335,10 +319,10 @@ function formatTokenMetric(
     const rounded = Math.round(val);
     return useLocale ? rounded.toLocaleString() : String(rounded);
   };
-  if (isSafeDocx) {
-    return `${f(floorMean || 0)} / ${f(mean)} [${f(floorMin || 0)}-${f(floorMax || 0)} / ${f(min)}-${f(max)}] (floor/total)`;
+  if (isSafeDocx && floorMetric) {
+    return `${f(floorMetric.mean)} / ${f(metric.mean)} [${f(floorMetric.min)}-${f(floorMetric.max)} / ${f(metric.min)}-${f(metric.max)}] (floor/total)`;
   }
-  return `${f(mean)} [${f(min)}-${f(max)}]`;
+  return `${f(metric.mean)} [${f(metric.min)}-${f(metric.max)}]`;
 }
 
 export async function runLiveBenchmark() {
@@ -611,10 +595,9 @@ export async function runLiveBenchmark() {
           const histStats = getStats(trials.map((t) => t.historyTokens));
           const newContStats = getStats(trials.map((t) => t.newContentTokens));
 
-          const roundTripsMean = trials.reduce((sum, t) => sum + t.roundTrips, 0) / repCount;
-          const turnsToSuccessMean =
-            trials.reduce((sum, t) => sum + t.turnsToSuccess, 0) / repCount;
-          const recoveryRateMean = trials.reduce((sum, t) => sum + t.recoveryRate, 0) / repCount;
+          const roundTripsStats = getStats(trials.map((t) => t.roundTrips));
+          const turnsToSuccessStats = getStats(trials.map((t) => t.turnsToSuccess));
+          const recoveryRateStats = getStats(trials.map((t) => t.recoveryRate));
 
           const xmlIntegrityRate = `${trials.filter((t) => t.xmlIntegrity === "PASS").length}/${repCount}`;
           const successRate = `${trials.filter((t) => t.success).length}/${repCount}`;
@@ -629,47 +612,21 @@ export async function runLiveBenchmark() {
             supported: true,
             reps: repCount,
 
-            latencyMeanMs: latStats.mean,
-            latencyMinMs: latStats.min,
-            latencyMaxMs: latStats.max,
-
-            tokensInMean: tokInStats.mean,
-            tokensInMin: tokInStats.min,
-            tokensInMax: tokInStats.max,
-
-            tokensOutMean: tokOutStats.mean,
-            tokensOutMin: tokOutStats.min,
-            tokensOutMax: tokOutStats.max,
-
-            totalTokensMean: totTokStats.mean,
-            totalTokensMin: totTokStats.min,
-            totalTokensMax: totTokStats.max,
-
-            xmlDeltaMean: xmlDeltaStats.mean,
-            xmlDeltaMin: xmlDeltaStats.min,
-            xmlDeltaMax: xmlDeltaStats.max,
-
+            latency: latStats,
+            tokensIn: tokInStats,
+            tokensOut: tokOutStats,
+            totalTokens: totTokStats,
+            xmlDelta: xmlDeltaStats,
             xmlIntegrityRate,
-            fidelityMean: fidStats.mean,
-            fidelityMin: fidStats.min,
-            fidelityMax: fidStats.max,
-
+            fidelity: fidStats,
             successRate,
-            roundTripsMean,
-            turnsToSuccessMean,
-            recoveryRateMean,
+            roundTrips: roundTripsStats,
+            turnsToSuccess: turnsToSuccessStats,
+            recoveryRate: recoveryRateStats,
 
-            schemaTokensMean: schStats.mean,
-            schemaTokensMin: schStats.min,
-            schemaTokensMax: schStats.max,
-
-            historyTokensMean: histStats.mean,
-            historyTokensMin: histStats.min,
-            historyTokensMax: histStats.max,
-
-            newContentTokensMean: newContStats.mean,
-            newContentTokensMin: newContStats.min,
-            newContentTokensMax: newContStats.max,
+            schemaTokens: schStats,
+            historyTokens: histStats,
+            newContentTokens: newContStats,
           });
         }
       }
@@ -1106,40 +1063,38 @@ function printLiveConsoleSummary(summaries: LiveTrialSummary[]) {
   console.log(`\n\x1b[1m\x1b[32m=== LIVE BENCHMARK CONSOLE SUMMARY (N=${reps}) ===\x1b[0m`);
   const tableRows = summaries.map((s) => {
     const isSafe = s.paradigm === "safe-docx";
+    const totalFloorStats: Stats | undefined = s.newContentTokens ? {
+      mean: s.newContentTokens.mean + s.tokensOut.mean,
+      min: s.newContentTokens.min + s.tokensOut.min,
+      max: s.newContentTokens.max + s.tokensOut.max,
+    } : undefined;
+
     return {
       Provider: s.provider,
       Scenario: s.scenarioId,
       Paradigm: s.paradigm,
       Size: s.docSize,
       "Succ Rate": s.successRate,
-      "XML Delta": `${s.xmlDeltaMean.toFixed(0)} [${s.xmlDeltaMin}-${s.xmlDeltaMax}]`,
-      Fidelity: `${s.fidelityMean.toFixed(1)}% [${s.fidelityMin}-${s.fidelityMax}]`,
+      "XML Delta": `${s.xmlDelta.mean.toFixed(0)} [${s.xmlDelta.min}-${s.xmlDelta.max}]`,
+      Fidelity: `${s.fidelity.mean.toFixed(1)}% [${s.fidelity.min}-${s.fidelity.max}]`,
       "Xml Integrity": s.xmlIntegrityRate,
-      Trips: s.roundTripsMean.toFixed(1),
-      TurnsSucc: s.turnsToSuccessMean.toFixed(1),
+      Trips: `${s.roundTrips.mean.toFixed(1)} [${s.roundTrips.min}-${s.roundTrips.max}]`,
+      TurnsSucc: `${s.turnsToSuccess.mean.toFixed(1)} [${s.turnsToSuccess.min}-${s.turnsToSuccess.max}]`,
       "Tokens In": formatTokenMetric(
-        s.tokensInMean,
-        s.tokensInMin,
-        s.tokensInMax,
-        s.newContentTokensMean,
-        s.newContentTokensMin,
-        s.newContentTokensMax,
+        s.tokensIn,
+        s.newContentTokens,
         isSafe,
         false,
       ),
-      "Tokens Out": `${Math.round(s.tokensOutMean)} [${Math.round(s.tokensOutMin)}-${Math.round(s.tokensOutMax)}]`,
+      "Tokens Out": `${Math.round(s.tokensOut.mean)} [${Math.round(s.tokensOut.min)}-${Math.round(s.tokensOut.max)}]`,
       "Total Tokens": formatTokenMetric(
-        s.totalTokensMean,
-        s.totalTokensMin,
-        s.totalTokensMax,
-        (s.newContentTokensMean || 0) + s.tokensOutMean,
-        (s.newContentTokensMin || 0) + s.tokensOutMin,
-        (s.newContentTokensMax || 0) + s.tokensOutMax,
+        s.totalTokens,
+        totalFloorStats,
         isSafe,
         false,
       ),
       Cost: "UNKNOWN",
-      Latency: `${(s.latencyMeanMs / 1000).toFixed(1)}s [${(s.latencyMinMs / 1000).toFixed(1)}-${(s.latencyMaxMs / 1000).toFixed(1)}]`,
+      Latency: `${(s.latency.mean / 1000).toFixed(1)}s [${(s.latency.min / 1000).toFixed(1)}-${(s.latency.max / 1000).toFixed(1)}]`,
     };
   });
   console.table(tableRows);
@@ -1184,12 +1139,18 @@ function writeLiveResultsFiles(summaries: LiveTrialSummary[]) {
 
     for (const s of sResults) {
       const isSafe = s.paradigm === "safe-docx";
+      const totalFloorStats: Stats | undefined = s.newContentTokens ? {
+        mean: s.newContentTokens.mean + s.tokensOut.mean,
+        min: s.newContentTokens.min + s.tokensOut.min,
+        max: s.newContentTokens.max + s.tokensOut.max,
+      } : undefined;
+
       md +=
-        `| **${s.paradigm}** | ${s.docSize} | ${s.successRate} | ${s.xmlDeltaMean.toFixed(0)} [${s.xmlDeltaMin}-${s.xmlDeltaMax}] | ${s.fidelityMean.toFixed(1)}% [${s.fidelityMin}-${s.fidelityMax}] | ${s.xmlIntegrityRate} | ${s.roundTripsMean.toFixed(1)} | ${s.turnsToSuccessMean.toFixed(1)} | ${(s.recoveryRateMean * 100).toFixed(1)}% | ` +
-        `${formatTokenMetric(s.tokensInMean, s.tokensInMin, s.tokensInMax, s.newContentTokensMean, s.newContentTokensMin, s.newContentTokensMax, isSafe, true)} | ` +
-        `${Math.round(s.tokensOutMean).toLocaleString()} [${Math.round(s.tokensOutMin).toLocaleString()}-${Math.round(s.tokensOutMax).toLocaleString()}] | ` +
-        `${formatTokenMetric(s.totalTokensMean, s.totalTokensMin, s.totalTokensMax, (s.newContentTokensMean || 0) + s.tokensOutMean, (s.newContentTokensMin || 0) + s.tokensOutMin, (s.newContentTokensMax || 0) + s.tokensOutMax, isSafe, true)} | ` +
-        `UNKNOWN | ${(s.latencyMeanMs / 1000).toFixed(1)}s [${(s.latencyMinMs / 1000).toFixed(1)}-${(s.latencyMaxMs / 1000).toFixed(1)}] |\n`;
+        `| **${s.paradigm}** | ${s.docSize} | ${s.successRate} | ${s.xmlDelta.mean.toFixed(0)} [${s.xmlDelta.min}-${s.xmlDelta.max}] | ${s.fidelity.mean.toFixed(1)}% [${s.fidelity.min}-${s.fidelity.max}] | ${s.xmlIntegrityRate} | ${s.roundTrips.mean.toFixed(1)} [${s.roundTrips.min}-${s.roundTrips.max}] | ${s.turnsToSuccess.mean.toFixed(1)} [${s.turnsToSuccess.min}-${s.turnsToSuccess.max}] | ${(s.recoveryRate.mean * 100).toFixed(1)}% [${(s.recoveryRate.min * 100).toFixed(1)}%-${(s.recoveryRate.max * 100).toFixed(1)}%] | ` +
+        `${formatTokenMetric(s.tokensIn, s.newContentTokens, isSafe, true)} | ` +
+        `${Math.round(s.tokensOut.mean).toLocaleString()} [${Math.round(s.tokensOut.min).toLocaleString()}-${Math.round(s.tokensOut.max).toLocaleString()}] | ` +
+        `${formatTokenMetric(s.totalTokens, totalFloorStats, isSafe, true)} | ` +
+        `UNKNOWN | ${(s.latency.mean / 1000).toFixed(1)}s [${(s.latency.min / 1000).toFixed(1)}-${(s.latency.max / 1000).toFixed(1)}] |\n`;
     }
     md += `\n`;
   }
