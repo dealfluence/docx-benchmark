@@ -274,7 +274,7 @@ export async function runLiveBenchmark() {
                 if (loopRes.finalBuffer) {
                   finalDoc = await DocumentObject.load(loopRes.finalBuffer);
                 }
-              } else if (paradigm === "adeu" && scenario.isAgentic) {
+              } else if (paradigm === "adeu") {
                 const fullTaskDescription = getFullTaskDescription(scenario);
                 const loopRes = await runAdeuLoop(
                   client as GoogleGenerativeAI,

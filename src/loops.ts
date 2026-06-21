@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { performance } from "node:perf_hooks";
-import { GoogleGenerativeAI, Content, FunctionDeclaration } from "@google/generative-ai";
+import { GoogleGenerativeAI, Content, FunctionDeclaration, Part } from "@google/generative-ai";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DocumentObject } from "@adeu/core";
@@ -187,14 +187,27 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
         const elapsedMs = Math.round(performance.now() - turnStart);
         const resObj = functionResponses[functionResponses.length - 1]?.response;
         const resStr = JSON.stringify(resObj);
+
+        // Truncate the raw stringified tool response for safe logging
+        const truncatedResult =
+          resStr && resStr.length > 250 ? resStr.substring(0, 250) + "..." : resStr;
+
+        // Extract any reasoning text from the current turn response parts
+        const reasoningText = parts
+          .filter((p: Part) => p.text)
+          .map((p: Part) => p.text!.trim())
+          .join("\n");
+
         console.log(
           JSON.stringify({
             turn,
             paradigm: loopName,
+            reasoning: reasoningText || undefined,
             tool: fc.name,
             args: fc.args,
             ok: !currentTurnHadError,
             resultBytes: resStr ? resStr.length : 0,
+            result: truncatedResult || undefined,
             elapsedMs,
           }),
         );
