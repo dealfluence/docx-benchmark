@@ -8,7 +8,7 @@ async function dump() {
   const doc = await DocumentObject.load(buffer);
   console.log("=== GOLDEN.DOCX PLAIN TEXT ===");
   console.log(new DocumentMapper(doc, true).full_text);
-  console.log("=== GOLDEN.DOCX CRITICMARKUP TEXT ===");
+  console.log("\n=== GOLDEN.DOCX CRITICMARKUP TEXT ===");
   console.log(new DocumentMapper(doc, false).full_text);
 
   const largePath = docPath.replace("golden.docx", "golden_large.docx");
@@ -16,12 +16,11 @@ async function dump() {
     const largeBuffer = fs.readFileSync(largePath);
     const largeDoc = await DocumentObject.load(largeBuffer);
     console.log("\n=========================================");
-    console.log("=== GOLDEN_LARGE.DOCX PLAIN TEXT ===");
-    console.log(new DocumentMapper(largeDoc, true).full_text);
-    console.log("=== GOLDEN_LARGE.DOCX CRITICMARKUP TEXT ===");
-    console.log(new DocumentMapper(largeDoc, false).full_text);
+    console.log("=== GOLDEN_LARGE.DOCX PREVIEW (First 1500 chars) ===");
+    const plainText = new DocumentMapper(largeDoc, true).full_text;
+    console.log(plainText.substring(0, 1500) + "\n... [TRUNCATED] ...");
   } else {
     console.log("\ngolden_large.docx not found.");
   }
 }
-dump();
+dump().catch(console.error);

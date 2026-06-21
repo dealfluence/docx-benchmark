@@ -9,24 +9,24 @@ describe("scenarios", () => {
   it("should have correct properties for each scenario", () => {
     const s1 = scenarios.find((s) => s.id === "surgical-correction");
     expect(s1).toBeDefined();
-    expect(s1?.targetText).toBe("Seller");
-    expect(s1?.replacementText).toBe("Vendor");
+    expect(s1?.targetText).toBe("NordicTech");
+    expect(s1?.replacementText).toBe("NordicGlobal");
 
     const s2 = scenarios.find((s) => s.id === "clause-drafting");
     expect(s2).toBeDefined();
-    expect(s2?.targetText).toBe("## 8. Governing Law");
-    expect(s2?.replacementText).toContain("## 9. Data Protection");
+    expect(s2?.targetText).toContain("8.3 Entire Agreement.");
+    expect(s2?.replacementText).toContain("8.4 Data Protection");
 
     const s3 = scenarios.find((s) => s.id === "negotiation-cleanup");
     expect(s3).toBeDefined();
     expect(s3?.reviewAction?.type).toBe("accept");
-    expect(s3?.reviewAction?.targetId).toBe("Chg:12");
+    expect(s3?.reviewAction?.targetId).toBe("Chg:2");
 
     const s4 = scenarios.find((s) => s.id === "bulk-rewrite");
     expect(s4).toBeDefined();
-    expect(s4?.targetText).toBe("Typing some. Typing some text");
+    expect(s4?.targetText).toContain("accrue late interest at the rate of 1.5%");
     expect(s4?.replacementText).toBe(
-      "This agreement is drafted to establish the terms of service.",
+      "Late payments shall accrue interest at the rate of 1.0% per month on any outstanding balance.",
     );
 
     const s5 = scenarios.find((s) => s.id === "whole-document-restyle");

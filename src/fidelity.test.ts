@@ -26,7 +26,7 @@ describe("fidelity checks", () => {
 
     // Check headers/footers
     const hasHdFt = hasHeaderOrFooter(doc);
-    expect(hasHdFt).toBe(false);
+    expect(hasHdFt).toBe(true); // The new real MSA baseline has running headers and footers
   });
 
   it("should return 100% fidelity score when comparing golden.docx to itself", async () => {

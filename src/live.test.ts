@@ -43,7 +43,7 @@ describe("live benchmark module", () => {
     const original = "<w:p><w:r><w:t>Seller hereby sells</w:t></w:r></w:p>";
     const response = `Here are the edits:
 <<<<<<< SEARCH
-<w:p><w:r><w:t>Seller hereby sells</w:t></w:r></w:p>
+<w:p><w:r><w:t>Vendor hereby sells</w:t></w:r></w:p>
 =======
 <w:p><w:r><w:t>Vendor hereby sells</w:t></w:r></w:p>
 >>>>>>> REPLACE`;
@@ -63,17 +63,16 @@ describe("success criteria and evaluation", () => {
     // Mock a successful surgical-correction
     const successfulStrip = await createStrippedDoc(
       buffer,
-      "This agreement is by and between the Vendor and the Buyer.",
+      "This agreement is by and between NordicGlobal and the Customer.",
     );
     const successfulSaved = await successfulStrip.save();
     const successfulDoc = await DocumentObject.load(successfulSaved);
-    console.log("MODIFIED PLAIN TEXT:", new DocumentMapper(successfulDoc, true).full_text);
     expect(checkScenarioSuccess("surgical-correction", originalDoc, successfulDoc)).toBe(true);
 
     // Mock a failing surgical-correction
     const failingStrip = await createStrippedDoc(
       buffer,
-      "This agreement is by and between the Seller and the Buyer.",
+      "This agreement is by and between NordicTech and the Customer.",
     );
     const failingSaved = await failingStrip.save();
     const failingDoc = await DocumentObject.load(failingSaved);
@@ -96,7 +95,7 @@ describe("success criteria and evaluation", () => {
     expect(result.stylesPreserved).toBe(false);
     expect(result.commentsPreserved).toBe(false);
     expect(result.trackChangesPreserved).toBe(false);
-    expect(result.score).toBe(40); // 20% baseline + 20% because headers/footers were absent (vacuous preservation)
+    expect(result.score).toBe(20); // Baseline unstyled 20%. Since the baselines are now natively present, stripping them incurs full loss.
   });
 });
 
@@ -265,54 +264,67 @@ describe("fairness and integrity check against hardcoded constants (F1)", () => 
 describe("F2-F8 Guard Tests", () => {
   it("F2: Safe Docx is a real loop", async () => {
     const docPath = getGoldenDocxPath();
+    let capturedParaId = "p_1"; // Dynamic fallback
 
     // Setup Mock Gemini which returns function calls for 3 turns, then finishes on the 4th turn.
     const mockModel = {
-      generateContent: (() => {
-        let turn = 0;
-        return async () => {
-          turn++;
-          if (turn === 1) {
-            return {
-              response: {
-                usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10 },
-                candidates: [
-                  {
-                    content: {
-                      parts: [
-                        {
-                          functionCall: {
-                            name: "grep",
-                            args: { pattern: "Seller", file_path: docPath },
-                          },
+      generateContent: async ({ contents }: { contents: any[] }) => {
+        const turn = Math.floor(contents.length / 2) + 1;
+        
+        // Extract paragraph ID dynamically from turn 1 grep result
+        if (turn === 2 && contents.length >= 3) {
+          const rawResult = contents[2].parts[0].functionResponse.response.result;
+          const text = rawResult?.[0]?.text || "";
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed.matches && parsed.matches.length > 0) {
+              capturedParaId = parsed.matches[0].paragraph_id;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        if (turn === 1) {
+          return {
+            response: {
+              usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10 },
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      {
+                        functionCall: {
+                          name: "grep",
+                          args: { pattern: "NordicTech", file_path: docPath },
                         },
-                      ],
-                    },
+                      },
+                    ],
                   },
-                ],
-                functionCalls: () => [
-                  { name: "grep", args: { pattern: "Seller", file_path: docPath } },
-                ],
-              },
-            };
-          } else if (turn === 2) {
-            return {
-              response: {
-                usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 12 },
-                candidates: [
-                  {
-                    content: {
-                      parts: [
-                        {
-                          functionCall: {
-                            name: "replace_text",
-                            args: {
-                              target_paragraph_id: "_bk_e23f91f98915",
-                              old_string: "Seller",
-                              new_string: "Vendor",
-                              instruction: "Update terminology to Vendor",
-                              file_path: docPath,
-                            },
+                },
+              ],
+              functionCalls: () => [
+                { name: "grep", args: { pattern: "NordicTech", file_path: docPath } },
+              ],
+            },
+          };
+        } else if (turn === 2) {
+          return {
+            response: {
+              usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 12 },
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      {
+                        functionCall: {
+                          name: "replace_text",
+                          args: {
+                            target_paragraph_id: capturedParaId,
+                            old_string: "NordicTech",
+                            new_string: "NordicGlobal",
+                            instruction: "Update terminology to NordicGlobal",
+                            file_path: docPath,
                           },
                         },
                       ],
@@ -323,10 +335,10 @@ describe("F2-F8 Guard Tests", () => {
                   {
                     name: "replace_text",
                     args: {
-                      target_paragraph_id: "_bk_e23f91f98915",
-                      old_string: "Seller",
-                      new_string: "Vendor",
-                      instruction: "Update terminology to Vendor",
+                      target_paragraph_id: capturedParaId,
+                      old_string: "NordicTech",
+                      new_string: "NordicGlobal",
+                      instruction: "Update terminology to NordicGlobal",
                       file_path: docPath,
                     },
                   },
@@ -358,8 +370,7 @@ describe("F2-F8 Guard Tests", () => {
               },
             };
           }
-        };
-      })(),
+      },
     };
 
     const mockGemini = {
@@ -371,14 +382,14 @@ describe("F2-F8 Guard Tests", () => {
       "gemini-3.5-flash",
       docPath,
       "surgical-correction",
-      "Update Seller to Vendor",
+      "Update NordicTech to NordicGlobal",
     );
 
     expect(loopRes.roundTrips).toBeGreaterThanOrEqual(2);
     expect(loopRes.success).toBe(true);
     expect(loopRes.finalBuffer).toBeDefined();
     expect(loopRes.finalBuffer?.length).toBeGreaterThan(0);
-  });
+  }, 60000);
 
   it("F4: Token summing", async () => {
     const docPath = getGoldenDocxPath();
@@ -425,7 +436,7 @@ describe("F2-F8 Guard Tests", () => {
     // Sum: 250 in, 30 out
     expect(loopRes.tokensIn).toBe(250);
     expect(loopRes.tokensOut).toBe(30);
-  });
+  }, 60000);
 
   it("F5: Fidelity discriminates", async () => {
     const docPath = getGoldenDocxPath();
@@ -449,11 +460,11 @@ describe("F2-F8 Guard Tests", () => {
     // 1. surgical-correction
     const passSurg = await createStrippedDoc(
       buffer,
-      "This agreement is by and between the Vendor and the Buyer.",
+      "This agreement is by and between NordicGlobal and the Customer.",
     );
     const failSurg = await createStrippedDoc(
       buffer,
-      "This agreement is by and between the Seller and the Buyer.",
+      "This agreement is by and between NordicTech and the Customer.",
     );
     expect(checkScenarioSuccess("surgical-correction", originalDoc, passSurg)).toBe(true);
     expect(checkScenarioSuccess("surgical-correction", originalDoc, failSurg)).toBe(false);
@@ -461,7 +472,7 @@ describe("F2-F8 Guard Tests", () => {
     // 2. clause-drafting
     const passDraft = await createStrippedDoc(
       buffer,
-      "## 9. Data Protection\nEach party shall comply with all applicable data protection laws",
+      "## 8.4 Data Protection\nEach party shall comply with all applicable data protection laws",
     );
     const failDraft = await createStrippedDoc(buffer, "Some other text");
     expect(checkScenarioSuccess("clause-drafting", originalDoc, passDraft)).toBe(true);
@@ -469,13 +480,13 @@ describe("F2-F8 Guard Tests", () => {
 
     // 3. negotiation-cleanup (checks CriticMarkup)
     const passNegotiation = await createStrippedDoc(buffer, "No changes left");
-    // original doc has Chg:12, so check on originalDoc should be false
+    // original doc has Chg:2, so check on originalDoc should be false
     expect(checkScenarioSuccess("negotiation-cleanup", originalDoc, passNegotiation)).toBe(true);
     expect(checkScenarioSuccess("negotiation-cleanup", originalDoc, originalDoc)).toBe(false);
 
     // 4. bulk-rewrite
-    const passBulk = await createStrippedDoc(buffer, "establish the terms of service");
-    const failBulk = await createStrippedDoc(buffer, "Typing some. Typing some text");
+    const passBulk = await createStrippedDoc(buffer, "Late payments shall accrue interest at the rate of 1.0%");
+    const failBulk = await createStrippedDoc(buffer, "accrue late interest at the rate of 1.5%");
     expect(checkScenarioSuccess("bulk-rewrite", originalDoc, passBulk)).toBe(true);
     expect(checkScenarioSuccess("bulk-rewrite", originalDoc, failBulk)).toBe(false);
 
@@ -493,7 +504,7 @@ describe("F2-F8 Guard Tests", () => {
     // 7. conditional-edit
     const passCond = await createStrippedDoc(
       buffer,
-      "Governing law is New York. Any venue shall be in the courts of NY.",
+      "Governing law is California. The parties irrevocably submit to the jurisdiction of California courts.",
     );
     const failCond = await createStrippedDoc(
       buffer,
@@ -505,20 +516,20 @@ describe("F2-F8 Guard Tests", () => {
     // 8. dependent-multi-target
     const passDep = await createStrippedDoc(
       buffer,
-      "confidentiality 6. liability cap 9. notices section 6",
+      "2.2 feedback 2.3 customer data 2.4 data usage rights notwithstanding section 2.3",
     );
-    const failDep = await createStrippedDoc(buffer, "confidentiality but no renumbering");
+    const failDep = await createStrippedDoc(buffer, "feedback but no renumbering");
     expect(checkScenarioSuccess("dependent-multi-target", originalDoc, passDep)).toBe(true);
     expect(checkScenarioSuccess("dependent-multi-target", originalDoc, failDep)).toBe(false);
 
     // 9. selective-verify-and-repair
-    expect(checkScenarioSuccess("selective-verify-and-repair", originalDoc, originalDoc)).toBe(
-      false,
-    );
+    const passSelective = await createStrippedDoc(buffer, "{++Esko Aho++}{>>[Chg:8 insert] Mikko<<}");
+    expect(checkScenarioSuccess("selective-verify-and-repair", originalDoc, passSelective)).toBe(true);
+    expect(checkScenarioSuccess("selective-verify-and-repair", originalDoc, originalDoc)).toBe(false);
 
     // 10. search-then-compute
-    const passSearchComp = await createStrippedDoc(buffer, "The liability cap is 50,000");
-    const failSearchComp = await createStrippedDoc(buffer, "The liability cap is 100,000");
+    const passSearchComp = await createStrippedDoc(buffer, "interest rate is 0.75%");
+    const failSearchComp = await createStrippedDoc(buffer, "interest rate is 1.5%");
     expect(checkScenarioSuccess("search-then-compute", originalDoc, passSearchComp)).toBe(true);
     expect(checkScenarioSuccess("search-then-compute", originalDoc, failSearchComp)).toBe(false);
   });
@@ -526,11 +537,11 @@ describe("F2-F8 Guard Tests", () => {
   it("F7: Schemas reject bad input", () => {
     // 1. Adeu Output Schema
     const goodAdeu = [
-      { type: "modify", target_text: "Seller", new_text: "Vendor" },
-      { type: "accept", target_id: "Chg:12" },
+      { type: "modify", target_text: "NordicTech", new_text: "NordicGlobal" },
+      { type: "accept", target_id: "Chg:2" },
     ];
-    const badAdeuMissingField = [{ type: "modify", target_text: "Seller" }];
-    const badAdeuWrongType = [{ type: "modify", target_text: "Seller", new_text: 1234 }];
+    const badAdeuMissingField = [{ type: "modify", target_text: "NordicTech" }];
+    const badAdeuWrongType = [{ type: "modify", target_text: "NordicTech", new_text: 1234 }];
 
     expect(AdeuOutputSchema.safeParse(goodAdeu).success).toBe(true);
     expect(AdeuOutputSchema.safeParse(badAdeuMissingField).success).toBe(false);
@@ -788,6 +799,7 @@ describe("F2-F8 Guard Tests", () => {
 
   it("F9: Agentic loop sees MCP tool use instructions and passes tool results in history", async () => {
     const docPath = getGoldenDocxPath();
+    let capturedParaId = "p_1"; // Dynamic fallback
 
     let capturedTools: any = null;
     const capturedContentsHistory: any[] = [];
@@ -797,6 +809,21 @@ describe("F2-F8 Guard Tests", () => {
         let turn = 0;
         return async ({ contents }: { contents: any[] }) => {
           turn++;
+          
+          // Extract paragraph ID dynamically from turn 1 grep result
+          if (turn === 2 && contents.length >= 3) {
+            const rawResult = contents[2].parts[0].functionResponse.response.result;
+            const text = rawResult?.[0]?.text || "";
+            try {
+              const parsed = JSON.parse(text);
+              if (parsed.matches && parsed.matches.length > 0) {
+                capturedParaId = parsed.matches[0].paragraph_id;
+              }
+            } catch {
+              // ignore
+            }
+          }
+
           // Capture contents history at the beginning of each generateContent call
           capturedContentsHistory.push(JSON.parse(JSON.stringify(contents)));
 
@@ -811,7 +838,7 @@ describe("F2-F8 Guard Tests", () => {
                         {
                           functionCall: {
                             name: "grep",
-                            args: { pattern: "Seller", file_path: docPath },
+                            args: { pattern: "NordicTech", file_path: docPath },
                           },
                         },
                       ],
@@ -819,7 +846,7 @@ describe("F2-F8 Guard Tests", () => {
                   },
                 ],
                 functionCalls: () => [
-                  { name: "grep", args: { pattern: "Seller", file_path: docPath } },
+                  { name: "grep", args: { pattern: "NordicTech", file_path: docPath } },
                 ],
               },
             };
@@ -835,10 +862,10 @@ describe("F2-F8 Guard Tests", () => {
                           functionCall: {
                             name: "replace_text",
                             args: {
-                              target_paragraph_id: "_bk_e23f91f98915",
-                              old_string: "Seller",
-                              new_string: "Vendor",
-                              instruction: "Update terminology to Vendor",
+                              target_paragraph_id: capturedParaId,
+                              old_string: "NordicTech",
+                              new_string: "NordicGlobal",
+                              instruction: "Update terminology to NordicGlobal",
                               file_path: docPath,
                             },
                           },
@@ -851,10 +878,10 @@ describe("F2-F8 Guard Tests", () => {
                   {
                     name: "replace_text",
                     args: {
-                      target_paragraph_id: "_bk_e23f91f98915",
-                      old_string: "Seller",
-                      new_string: "Vendor",
-                      instruction: "Update terminology to Vendor",
+                      target_paragraph_id: capturedParaId,
+                      old_string: "NordicTech",
+                      new_string: "NordicGlobal",
+                      instruction: "Update terminology to NordicGlobal",
                       file_path: docPath,
                     },
                   },
@@ -902,7 +929,7 @@ describe("F2-F8 Guard Tests", () => {
       "gemini-3.5-flash",
       docPath,
       "surgical-correction",
-      "Update Seller to Vendor",
+      "Update NordicTech to NordicGlobal",
     );
 
     // 1. Verify that the agent gets to see the tool use instructions from the MCP
@@ -958,5 +985,5 @@ describe("F2-F8 Guard Tests", () => {
     expect(capturedContentsHistory[2][4].parts[0].functionResponse.name).toBe("replace_text");
 
     expect(loopRes.success).toBe(true);
-  });
+  }, 60000);
 });

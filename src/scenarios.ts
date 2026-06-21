@@ -18,44 +18,43 @@ export const scenarios: Scenario[] = [
     id: "surgical-correction",
     name: "Surgical Correction (Terminology Update)",
     description:
-      "A 20-page document where a single word needs to be updated. Shows the massive advantage of Adeu's surgical JSON output over full-document XML/Markdown re-emission.",
-    targetText: "Seller",
-    replacementText: "Vendor",
+      "A contract where a corporate party name needs to be updated. Tests the capability to perform highly targeted search-and-replace edits.",
+    targetText: "NordicTech",
+    replacementText: "NordicGlobal",
   },
   {
     id: "clause-drafting",
     name: "Clause Drafting (Section Insertion)",
     description:
-      "Inserting a structured 3-paragraph clause including a new Heading 2. Measures formatting inheritance and paragraph-break tracking.",
-    targetText: "## 8. Governing Law",
-    replacementText:
-      "## 8. Governing Law\n\n## 9. Data Protection\n\nEach party shall comply with all applicable data protection laws...",
+      "Inserting a structured data protection clause at the end of the General Provisions section. Measures formatting inheritance and layout consistency.",
+    targetText: "8.3 Entire Agreement.\n\nThis Agreement is the entire agreement between Provider and Customer regarding Customer’s use of Services and supersedes all prior and contemporaneous agreements, proposals or representations, written or oral, concerning its subject matter.",
+    replacementText: "8.3 Entire Agreement.\n\nThis Agreement is the entire agreement between Provider and Customer regarding Customer’s use of Services and supersedes all prior and contemporaneous agreements, proposals or representations, written or oral, concerning its subject matter.\n\n8.4 Data Protection.\n\nEach party shall comply with all applicable data protection laws.",
   },
   {
     id: "negotiation-cleanup",
     name: "Negotiation Cleanup (Track Changes Accept)",
     description:
-      "Finalizing an existing tracked change. Demonstrates that alternative baselines cannot natively execute review operations without completely breaking XML references.",
+      "Accepting an existing tracked revision in the document. Demonstrates whether the paradigm can cleanly execute review operations on native XML nodes.",
     targetText: "",
     replacementText: "",
     reviewAction: {
       type: "accept",
-      targetId: "Chg:12",
+      targetId: "Chg:2",
     },
   },
   {
     id: "bulk-rewrite",
     name: "Bulk Rewrite (Clause/Section Replacement)",
     description:
-      "Rewriting an entire multi-paragraph section. In this scenario, the output-token advantages of surgical patching vs full re-emission are minimized, testing the paradigm boundaries.",
-    targetText: "Typing some. Typing some text",
-    replacementText: "This agreement is drafted to establish the terms of service.",
+      "Replacing an entire clause with a rewritten standard. Evaluates cost advantages of surgical patching vs full re-emission when block changes are larger.",
+    targetText: "If any invoiced amount is not received by Provider by the due date, then without limiting Provider’s rights or remedies, those charges may accrue late interest at the rate of 1.5% of the outstanding balance per month, or the maximum rate permitted by law, whichever is lower.",
+    replacementText: "Late payments shall accrue interest at the rate of 1.0% per month on any outstanding balance.",
   },
   {
     id: "whole-document-restyle",
     name: "Whole Document Restyle (Capitalization / Global Change)",
     description:
-      "A global change touching document elements. Tests cases where the patch size is equal to or larger than full re-emission.",
+      "Capitalizing section titles globally throughout the contract to check formatting consistency on multiple targets.",
     targetText: "Governing Law",
     replacementText: "GOVERNING LAW",
   },
@@ -63,15 +62,15 @@ export const scenarios: Scenario[] = [
     id: "no-op",
     name: "No-Op / Already Correct (Robustness Test)",
     description:
-      "Instructs the model to modify a term that does not exist in the document. Correct behavior is to perform no edits, testing robustness against hallucinated edits.",
+      "Instructing the model to edit a term that does not exist in the contract. Correct behavior is to perform zero modifications, verifying resistance to hallucination.",
     targetText: "NonExistentWord",
     replacementText: "ShouldNotBeInserted",
   },
   {
     id: "conditional-edit",
-    name: "Conditional Clause Insertion (US vs State)",
+    name: "Conditional Clause Insertion (State Venue)",
     description:
-      "Observe Governing Law (Section 8 / Heading 8). If the section has no text or does not specify a state, assume the US state is New York, write that the governing law is New York, and append a New York state venue clause. If a country, append an arbitration clause.",
+      "Inspect the Governing Law and Venue clause in Section 8.1. If the governing law is California, append the sentence: 'The parties irrevocably submit to the jurisdiction of California courts.' If any other state, do nothing.",
     targetText: "",
     replacementText: "",
     isAgentic: true,
@@ -80,7 +79,7 @@ export const scenarios: Scenario[] = [
     id: "dependent-multi-target",
     name: "Dependent Multi-Target (Section Renumbering)",
     description:
-      "Insert Section 5 Confidentiality, renumber subsequent sections, and update cross-reference in Section 8 (Notices) to point to shifted Section 6.",
+      "Insert a new Section 2.2 'Feedback' allowing Provider to use Customer suggestions. Renumber the subsequent sections in Article 2 (original 2.2 'Customer Data' becomes 2.3, and original 2.3 'Data Usage Rights' becomes 2.4). Also, update the cross-reference inside the newly-renumbered Section 2.4 to point to Section 2.3 instead of Section 2.2 (it currently says 'Notwithstanding Section 2.2').",
     targetText: "",
     replacementText: "",
     isAgentic: true,
@@ -89,16 +88,16 @@ export const scenarios: Scenario[] = [
     id: "selective-verify-and-repair",
     name: "Selective Verify and Repair (Indemnity Exemption)",
     description:
-      "Accept all tracked changes in the document, except those in Section 6 (Indemnity).",
+      "Accept all tracked changes in the document, EXCEPT those in Section 5.2 (Indemnification by Provider) which must remain intact as tracked changes.",
     targetText: "",
     replacementText: "",
     isAgentic: true,
   },
   {
     id: "search-then-compute",
-    name: "Search-then-Compute (Halve Liability Cap)",
+    name: "Search-then-Compute (Halve Interest Rate)",
     description:
-      "Find the liability cap value in Section 5, halve the amount, and replace the old cap with the new halved value.",
+      "Find the late interest percentage rate in Section 3.3, halve the numeric value, and replace the old rate with the new halved value (from 1.5% to 0.75%).",
     targetText: "",
     replacementText: "",
     isAgentic: true,

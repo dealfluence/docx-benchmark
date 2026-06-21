@@ -19,29 +19,61 @@ export function validateXmlSyntax(rawOutput: string): boolean {
 
 /**
  * Parses and merges XML modifications expressed as SEARCH/REPLACE blocks.
+ * Uses a robust line-based state machine to bypass regex line-ending limitations.
  */
 export function applyXmlSearchReplace(originalXml: string, responseText: string): string {
-  const blockRegex =
-    /<<<<<<< SEARCH\r?\n([\s\S]*?)\r?\n=======\r?\n([\s\S]*?)\r?\n>>>>>>> REPLACE/g;
-  let matches = [...responseText.matchAll(blockRegex)];
+  const lines = responseText.split(/\r?\n/);
+  const blocks: Array<{ search: string; replace: string }> = [];
+  
+  let inSearch = false;
+  let inReplace = false;
+  let searchLines: string[] = [];
+  let replaceLines: string[] = [];
+  let hasHeaders = false;
 
-  if (matches.length === 0) {
-    const lenientRegex = /<<<<<<< SEARCH([\s\S]*?)=======\s*([\s\S]*?)>>>>>>> REPLACE/g;
-    matches = [...responseText.matchAll(lenientRegex)];
+  for (const line of lines) {
+    if (line.includes("<<<<<<< SEARCH")) {
+      inSearch = true;
+      inReplace = false;
+      searchLines = [];
+      replaceLines = [];
+      hasHeaders = true;
+      continue;
+    }
+    if (line.includes("=======") && inSearch) {
+      inSearch = false;
+      inReplace = true;
+      continue;
+    }
+    if (line.includes(">>>>>>> REPLACE") && inReplace) {
+      inSearch = false;
+      inReplace = false;
+      blocks.push({
+        search: searchLines.join("\n"),
+        replace: replaceLines.join("\n"),
+      });
+      continue;
+    }
+
+    if (inSearch) {
+      searchLines.push(line);
+    } else if (inReplace) {
+      replaceLines.push(line);
+    }
   }
 
-  if (matches.length === 0) {
-    if (responseText.includes("<<<<<<< SEARCH")) {
+  if (blocks.length === 0) {
+    if (hasHeaders || responseText.includes("<<<<<<< SEARCH")) {
       throw new Error("Found SEARCH/REPLACE headers but failed to parse them cleanly.");
     }
     return responseText; // Treat entire output as full XML
   }
 
   let patchedXml = originalXml;
-  for (const match of matches) {
-    const searchBlock = match[1];
-    const replaceBlock = match[2];
-    const normalizedSearch = searchBlock.replace(/\r\n/g, "\n").trim();
+  for (const block of blocks) {
+    const searchBlock = block.search;
+    const replaceBlock = block.replace;
+    const normalizedSearch = searchBlock.trim();
 
     if (patchedXml.includes(searchBlock)) {
       patchedXml = patchedXml.replace(searchBlock, replaceBlock);
@@ -78,6 +110,7 @@ export function applyXmlSearchReplace(originalXml: string, responseText: string)
       }
     }
   }
+
   return patchedXml;
 }
 

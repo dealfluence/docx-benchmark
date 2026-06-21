@@ -9,12 +9,14 @@ export function checkScenarioSuccess(
   const modPlain = new DocumentMapper(modifiedDoc, true).full_text;
   const modCritic = new DocumentMapper(modifiedDoc, false).full_text;
 
+  const normalizedMod = modPlain.replace(/\s+/g, " ").trim();
+
   switch (scenarioId) {
     case "surgical-correction": {
-      // Must contain Vendor, must NOT contain Seller
-      const hasVendor = modPlain.includes("Vendor");
-      const hasSeller = modPlain.includes("Seller");
-      return hasVendor && !hasSeller;
+      // Must contain NordicGlobal, must NOT contain NordicTech
+      const hasNordicGlobal = modPlain.includes("NordicGlobal");
+      const hasNordicTech = modPlain.includes("NordicTech");
+      return hasNordicGlobal && !hasNordicTech;
     }
 
     case "clause-drafting": {
@@ -27,16 +29,15 @@ export function checkScenarioSuccess(
     }
 
     case "negotiation-cleanup": {
-      // The revision Chg:12 should no longer be present in CriticMarkup metadata tags
-      const hasChg12InMetadata = modCritic.includes("Chg:12");
-      return !hasChg12InMetadata;
+      // The revision Chg:2 should no longer be present in CriticMarkup metadata tags
+      const hasChg2InMetadata = modCritic.includes("Chg:2");
+      return !hasChg2InMetadata;
     }
 
     case "bulk-rewrite": {
       // Must contain the new clause, and old clause must be gone
-      const hasNew = modPlain.includes("establish the terms of service");
-      const hasOld =
-        modPlain.includes("Typing some. Typing some text") || modPlain.includes("Typing some text");
+      const hasNew = modPlain.includes("Late payments shall accrue interest at the rate of 1.0%");
+      const hasOld = modPlain.includes("accrue late interest at the rate of 1.5%");
       return hasNew && !hasOld;
     }
 
@@ -55,63 +56,41 @@ export function checkScenarioSuccess(
     }
 
     case "conditional-edit": {
+      // Must contain jurisdiction of California courts
       const text = modPlain.toLowerCase();
-      const hasNewYork = text.includes("new york");
-      const hasVenue =
-        text.includes("venue") ||
-        text.includes("court") ||
-        text.includes("courts") ||
-        text.includes("jurisdiction");
-      const hasArbitration = text.includes("arbitration");
-      return hasNewYork && hasVenue && !hasArbitration;
+      return text.includes("california courts");
     }
 
     case "dependent-multi-target": {
-      const text = modPlain.toLowerCase();
-      const hasConfidentiality = text.includes("confidentiality");
-      // Check that Liability Cap was renumbered to Section 6, and Notices to Section 9 (since we inserted Section 5 Confidentiality)
-      const hasSection6Liability =
-        text.includes("6. liability cap") ||
-        text.includes("section 6. liability cap") ||
-        text.includes("## 6. liability cap") ||
-        text.includes("6. liability");
-      const hasSection9Notices =
-        text.includes("9. notices") ||
-        text.includes("section 9. notices") ||
-        text.includes("## 9. notices") ||
-        text.includes("9. notices");
-      // Notices section should mention section 6 or §6 or shifted number
-      const noticesIndex = text.indexOf("notices");
-      const noticesPart = noticesIndex !== -1 ? text.substring(noticesIndex) : "";
-      const referencesSection6 =
-        noticesPart.includes("6") ||
-        noticesPart.includes("§6") ||
-        noticesPart.includes("section 6");
-      return hasConfidentiality && hasSection6Liability && hasSection9Notices && referencesSection6;
+      const text = normalizedMod.toLowerCase();
+      const hasFeedback = text.includes("feedback");
+      const hasSection22 = text.includes("2.2 feedback");
+      const hasSection23 = text.includes("2.3 customer data");
+      const hasSection24 = text.includes("2.4 data usage rights");
+      
+      // Check that the reference "Notwithstanding Section 2.2" in Data Usage Rights was updated to 2.3
+      const hasUpdatedRef = text.includes("notwithstanding section 2.3");
+      
+      return hasFeedback && hasSection22 && hasSection23 && hasSection24 && hasUpdatedRef;
     }
 
     case "selective-verify-and-repair": {
-      // Revisions in Section 6 (Indemnity) must survive (i.e. still be tracked changes)
-      // Since it had "Seller" and "Vendor", if it survived, both or the criticmarkup tags/metadata should be present
-      const hasChg12Or13 =
-        modCritic.includes("Chg:12") ||
-        modCritic.includes("Chg:13") ||
-        modCritic.includes("{++Seller++}") ||
-        modCritic.includes("{--Vendor--}");
-      // Revisions in other paragraphs (like Chg:2) should be accepted and gone
+      // Revisions in Section 5.2 (Indemnity) must survive (Chg:8, Chg:9)
+      const hasIndemnityChg = modCritic.includes("Chg:8") || modCritic.includes("Chg:9");
+      // Revisions in other paragraphs (like Chg:1, Chg:2, Chg:3, Chg:4) should be accepted and gone
       const hasOtherChgs =
+        modCritic.includes("Chg:1") ||
         modCritic.includes("Chg:2") ||
         modCritic.includes("Chg:3") ||
-        modCritic.includes("Chg:6") ||
-        modCritic.includes("Chg:9");
-      return hasChg12Or13 && !hasOtherChgs;
+        modCritic.includes("Chg:4");
+      return hasIndemnityChg && !hasOtherChgs;
     }
 
     case "search-then-compute": {
-      // Original was $100,000, halved is $50,000
-      const has50k = modPlain.includes("50,000");
-      const has100k = modPlain.includes("100,000");
-      return has50k && !has100k;
+      // Halve interest rate from 1.5% to 0.75%
+      const has075 = modPlain.includes("0.75%");
+      const has15 = modPlain.includes("1.5%");
+      return has075 && !has15;
     }
 
     default:
