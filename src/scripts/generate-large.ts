@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { DocumentObject } from "@adeu/core";
-import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
+import { DOMParser, XMLSerializer, Node } from "@xmldom/xmldom";
 import { getGoldenDocxPath } from "../baselines.js";
 
 async function main() {
