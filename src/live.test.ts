@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import { describe, it, expect } from "vitest";
-import { DocumentObject, DocumentMapper } from "@adeu/core";
+import { DocumentObject } from "@adeu/core";
 import {
   runLiveBenchmark,
   validateXmlSyntax,
@@ -43,7 +43,7 @@ describe("live benchmark module", () => {
     const original = "<w:p><w:r><w:t>Seller hereby sells</w:t></w:r></w:p>";
     const response = `Here are the edits:
 <<<<<<< SEARCH
-<w:p><w:r><w:t>Vendor hereby sells</w:t></w:r></w:p>
+<w:p><w:r><w:t>Seller hereby sells</w:t></w:r></w:p>
 =======
 <w:p><w:r><w:t>Vendor hereby sells</w:t></w:r></w:p>
 >>>>>>> REPLACE`;
@@ -278,7 +278,7 @@ describe("F2-F8 Guard Tests", () => {
           try {
             const parsed = JSON.parse(text);
             if (parsed.matches && parsed.matches.length > 0) {
-              capturedParaId = parsed.matches[0].paragraph_id;
+              capturedParaId = parsed.matches[0].para_id || parsed.matches[0].paragraph_id;
             }
           } catch {
             // ignore
@@ -327,10 +327,11 @@ describe("F2-F8 Guard Tests", () => {
                             file_path: docPath,
                           },
                         },
-                      ],
-                    },
+                      },
+                    ],
                   },
-                ],
+                },
+              ],
                 functionCalls: () => [
                   {
                     name: "replace_text",
@@ -817,7 +818,7 @@ describe("F2-F8 Guard Tests", () => {
             try {
               const parsed = JSON.parse(text);
               if (parsed.matches && parsed.matches.length > 0) {
-                capturedParaId = parsed.matches[0].paragraph_id;
+                capturedParaId = parsed.matches[0].para_id || parsed.matches[0].paragraph_id;
               }
             } catch {
               // ignore
