@@ -12,7 +12,9 @@ export async function main() {
     const results = await runSimulation(docPath);
 
     // 1. Color-coded console.table output
-    console.log(`\x1b[1m\x1b[32m=== Illustrative Token Estimates (offline, no model calls — not a benchmark) ===\x1b[0m`);
+    console.log(
+      `\x1b[1m\x1b[32m=== Illustrative Token Estimates (offline, no model calls — not a benchmark) ===\x1b[0m`,
+    );
     const consoleRows = results.map((r) => ({
       Scenario: r.scenarioId,
       "Baseline Model": r.baselineName,

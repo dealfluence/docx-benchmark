@@ -18,7 +18,7 @@ async function main() {
 
   const mcpClient = new Client(
     { name: "benchmark-test-client", version: "1.0.0" },
-    { capabilities: {} }
+    { capabilities: {} },
   );
 
   await mcpClient.connect(transport);

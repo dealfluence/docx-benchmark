@@ -25,7 +25,9 @@ describe("scenarios", () => {
     const s4 = scenarios.find((s) => s.id === "bulk-rewrite");
     expect(s4).toBeDefined();
     expect(s4?.targetText).toBe("Typing some. Typing some text");
-    expect(s4?.replacementText).toBe("This agreement is drafted to establish the terms of service.");
+    expect(s4?.replacementText).toBe(
+      "This agreement is drafted to establish the terms of service.",
+    );
 
     const s5 = scenarios.find((s) => s.id === "whole-document-restyle");
     expect(s5).toBeDefined();

@@ -200,16 +200,25 @@ export async function createStrippedDoc(
  * Calculates the edit distance delta between original and modified XML strings by tag boundaries.
  */
 export function calculateXmlDelta(originalXml: string, modifiedXml: string): number {
-  if (!originalXml || !modifiedXml) return Math.abs((originalXml || "").length - (modifiedXml || "").length);
-  
+  if (!originalXml || !modifiedXml)
+    return Math.abs((originalXml || "").length - (modifiedXml || "").length);
+
   const oXml = originalXml.replace(/\r\n/g, "\n");
   const mXml = modifiedXml.replace(/\r\n/g, "\n");
 
   if (oXml === mXml) return 0;
 
   // Split at closing XML tags to prevent single-line DP bloat
-  const oLines = oXml.replace(/>/g, ">\n").split("\n").map(l => l.trim()).filter(Boolean);
-  const mLines = mXml.replace(/>/g, ">\n").split("\n").map(l => l.trim()).filter(Boolean);
+  const oLines = oXml
+    .replace(/>/g, ">\n")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const mLines = mXml
+    .replace(/>/g, ">\n")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
 
   const N = oLines.length;
   const M = mLines.length;
@@ -221,7 +230,7 @@ export function calculateXmlDelta(originalXml: string, modifiedXml: string): num
     for (let i = 0; i < limit; i++) {
       if (oXml[i] === mXml[i]) matchingChars++;
     }
-    return (oXml.length - matchingChars) + (mXml.length - matchingChars);
+    return oXml.length - matchingChars + (mXml.length - matchingChars);
   }
 
   const dp: number[][] = Array.from({ length: N + 1 }, () => Array(M + 1).fill(0));

@@ -27,9 +27,9 @@ describe("live benchmark module", () => {
   });
 
   it("should correctly clean markdown json blocks", () => {
-    const dirty = "```json\n[\n  { \"type\": \"noOp\" }\n]\n```";
+    const dirty = '```json\n[\n  { "type": "noOp" }\n]\n```';
     const cleaned = cleanJsonResponse(dirty);
-    expect(cleaned).toBe("[\n  { \"type\": \"noOp\" }\n]");
+    expect(cleaned).toBe('[\n  { "type": "noOp" }\n]');
   });
 
   it("should parse and apply XML search/replace blocks fairly", () => {
@@ -54,14 +54,20 @@ describe("success criteria and evaluation", () => {
     const originalDoc = await DocumentObject.load(buffer);
 
     // Mock a successful surgical-correction
-    const successfulStrip = await createStrippedDoc(buffer, "This agreement is by and between the Vendor and the Buyer.");
+    const successfulStrip = await createStrippedDoc(
+      buffer,
+      "This agreement is by and between the Vendor and the Buyer.",
+    );
     const successfulSaved = await successfulStrip.save();
     const successfulDoc = await DocumentObject.load(successfulSaved);
     console.log("MODIFIED PLAIN TEXT:", new DocumentMapper(successfulDoc, true).full_text);
     expect(checkScenarioSuccess("surgical-correction", originalDoc, successfulDoc)).toBe(true);
 
     // Mock a failing surgical-correction
-    const failingStrip = await createStrippedDoc(buffer, "This agreement is by and between the Seller and the Buyer.");
+    const failingStrip = await createStrippedDoc(
+      buffer,
+      "This agreement is by and between the Seller and the Buyer.",
+    );
     const failingSaved = await failingStrip.save();
     const failingDoc = await DocumentObject.load(failingSaved);
     expect(checkScenarioSuccess("surgical-correction", originalDoc, failingDoc)).toBe(false);
@@ -108,12 +114,12 @@ describe("fairness and integrity check against hardcoded constants (F1)", () => 
 
     if (staticFailMatches) {
       for (const m of staticFailMatches) {
-        expect(m).not.toContain("xmlIntegrity: \"FAIL\"");
+        expect(m).not.toContain('xmlIntegrity: "FAIL"');
       }
     }
     if (staticPassMatches) {
       for (const m of staticPassMatches) {
-        expect(m).not.toContain("xmlIntegrity: \"PASS\"");
+        expect(m).not.toContain('xmlIntegrity: "PASS"');
       }
     }
 
@@ -128,7 +134,7 @@ describe("fairness and integrity check against hardcoded constants (F1)", () => 
       expect(match).not.toContain("fidelity: 100");
       expect(match).not.toContain("fidelity: 40");
       expect(match).not.toContain("success: true");
-      expect(match).not.toContain("xmlIntegrity: \"PASS\"");
+      expect(match).not.toContain('xmlIntegrity: "PASS"');
     }
   });
 });
@@ -148,46 +154,93 @@ describe("F2-F8 Guard Tests", () => {
               response: {
                 usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10 },
                 candidates: [
-                  { content: { parts: [{ functionCall: { name: "grep", args: { pattern: "Seller", file_path: docPath } } }] } }
+                  {
+                    content: {
+                      parts: [
+                        {
+                          functionCall: {
+                            name: "grep",
+                            args: { pattern: "Seller", file_path: docPath },
+                          },
+                        },
+                      ],
+                    },
+                  },
                 ],
-                functionCalls: () => [{ name: "grep", args: { pattern: "Seller", file_path: docPath } }]
-              }
+                functionCalls: () => [
+                  { name: "grep", args: { pattern: "Seller", file_path: docPath } },
+                ],
+              },
             };
           } else if (turn === 2) {
             return {
               response: {
                 usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 12 },
                 candidates: [
-                  { content: { parts: [{ functionCall: { name: "replace_text", args: { target_paragraph_id: "_bk_e23f91f98915", old_string: "Seller", new_string: "Vendor", instruction: "Update terminology to Vendor", file_path: docPath } } }] } }
+                  {
+                    content: {
+                      parts: [
+                        {
+                          functionCall: {
+                            name: "replace_text",
+                            args: {
+                              target_paragraph_id: "_bk_e23f91f98915",
+                              old_string: "Seller",
+                              new_string: "Vendor",
+                              instruction: "Update terminology to Vendor",
+                              file_path: docPath,
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  },
                 ],
-                functionCalls: () => [{ name: "replace_text", args: { target_paragraph_id: "_bk_e23f91f98915", old_string: "Seller", new_string: "Vendor", instruction: "Update terminology to Vendor", file_path: docPath } }]
-              }
+                functionCalls: () => [
+                  {
+                    name: "replace_text",
+                    args: {
+                      target_paragraph_id: "_bk_e23f91f98915",
+                      old_string: "Seller",
+                      new_string: "Vendor",
+                      instruction: "Update terminology to Vendor",
+                      file_path: docPath,
+                    },
+                  },
+                ],
+              },
             };
           } else if (turn === 3) {
             return {
               response: {
                 usageMetadata: { promptTokenCount: 140, candidatesTokenCount: 15 },
                 candidates: [
-                  { content: { parts: [{ functionCall: { name: "save", args: { save_to_local_path: docPath } } }] } }
+                  {
+                    content: {
+                      parts: [
+                        { functionCall: { name: "save", args: { save_to_local_path: docPath } } },
+                      ],
+                    },
+                  },
                 ],
-                functionCalls: () => [{ name: "save", args: { save_to_local_path: docPath } }]
-              }
+                functionCalls: () => [{ name: "save", args: { save_to_local_path: docPath } }],
+              },
             };
           } else {
             return {
               response: {
                 usageMetadata: { promptTokenCount: 150, candidatesTokenCount: 5 },
                 candidates: [],
-                functionCalls: () => []
-              }
+                functionCalls: () => [],
+              },
             };
           }
         };
-      })()
+      })(),
     };
 
     const mockGemini = {
-      getGenerativeModel: () => mockModel
+      getGenerativeModel: () => mockModel,
     } as any;
 
     const loopRes = await runSafeDocxLoop(
@@ -195,7 +248,7 @@ describe("F2-F8 Guard Tests", () => {
       "gemini-3.5-flash",
       docPath,
       "surgical-correction",
-      "Update Seller to Vendor"
+      "Update Seller to Vendor",
     );
 
     expect(loopRes.roundTrips).toBeGreaterThanOrEqual(2);
@@ -216,22 +269,22 @@ describe("F2-F8 Guard Tests", () => {
               response: {
                 usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10 },
                 candidates: [
-                  { content: { parts: [{ functionCall: { name: "save", args: {} } }] } }
+                  { content: { parts: [{ functionCall: { name: "save", args: {} } }] } },
                 ],
-                functionCalls: () => [{ name: "save", args: {} }]
-              }
+                functionCalls: () => [{ name: "save", args: {} }],
+              },
             };
           } else {
             return {
               response: {
                 usageMetadata: { promptTokenCount: 150, candidatesTokenCount: 20 },
                 candidates: [],
-                functionCalls: () => []
-              }
+                functionCalls: () => [],
+              },
             };
           }
         };
-      })()
+      })(),
     };
     const mockGemini = { getGenerativeModel: () => mockModel } as any;
 
@@ -240,7 +293,7 @@ describe("F2-F8 Guard Tests", () => {
       "gemini-3.5-flash",
       docPath,
       "no-op",
-      "No op"
+      "No op",
     );
 
     // Total tokens should be sum across both turns:
@@ -271,13 +324,22 @@ describe("F2-F8 Guard Tests", () => {
     const originalDoc = await DocumentObject.load(buffer);
 
     // 1. surgical-correction
-    const passSurg = await createStrippedDoc(buffer, "This agreement is by and between the Vendor and the Buyer.");
-    const failSurg = await createStrippedDoc(buffer, "This agreement is by and between the Seller and the Buyer.");
+    const passSurg = await createStrippedDoc(
+      buffer,
+      "This agreement is by and between the Vendor and the Buyer.",
+    );
+    const failSurg = await createStrippedDoc(
+      buffer,
+      "This agreement is by and between the Seller and the Buyer.",
+    );
     expect(checkScenarioSuccess("surgical-correction", originalDoc, passSurg)).toBe(true);
     expect(checkScenarioSuccess("surgical-correction", originalDoc, failSurg)).toBe(false);
 
     // 2. clause-drafting
-    const passDraft = await createStrippedDoc(buffer, "## 9. Data Protection\nEach party shall comply with all applicable data protection laws");
+    const passDraft = await createStrippedDoc(
+      buffer,
+      "## 9. Data Protection\nEach party shall comply with all applicable data protection laws",
+    );
     const failDraft = await createStrippedDoc(buffer, "Some other text");
     expect(checkScenarioSuccess("clause-drafting", originalDoc, passDraft)).toBe(true);
     expect(checkScenarioSuccess("clause-drafting", originalDoc, failDraft)).toBe(false);
@@ -306,19 +368,30 @@ describe("F2-F8 Guard Tests", () => {
     expect(checkScenarioSuccess("no-op", originalDoc, failNoOp)).toBe(false);
 
     // 7. conditional-edit
-    const passCond = await createStrippedDoc(buffer, "Governing law is New York. Any venue shall be in the courts of NY.");
-    const failCond = await createStrippedDoc(buffer, "Governing law is Germany. Disputes resolved by arbitration.");
+    const passCond = await createStrippedDoc(
+      buffer,
+      "Governing law is New York. Any venue shall be in the courts of NY.",
+    );
+    const failCond = await createStrippedDoc(
+      buffer,
+      "Governing law is Germany. Disputes resolved by arbitration.",
+    );
     expect(checkScenarioSuccess("conditional-edit", originalDoc, passCond)).toBe(true);
     expect(checkScenarioSuccess("conditional-edit", originalDoc, failCond)).toBe(false);
 
     // 8. dependent-multi-target
-    const passDep = await createStrippedDoc(buffer, "confidentiality 6. liability cap 9. notices section 6");
+    const passDep = await createStrippedDoc(
+      buffer,
+      "confidentiality 6. liability cap 9. notices section 6",
+    );
     const failDep = await createStrippedDoc(buffer, "confidentiality but no renumbering");
     expect(checkScenarioSuccess("dependent-multi-target", originalDoc, passDep)).toBe(true);
     expect(checkScenarioSuccess("dependent-multi-target", originalDoc, failDep)).toBe(false);
 
     // 9. selective-verify-and-repair
-    expect(checkScenarioSuccess("selective-verify-and-repair", originalDoc, originalDoc)).toBe(false);
+    expect(checkScenarioSuccess("selective-verify-and-repair", originalDoc, originalDoc)).toBe(
+      false,
+    );
 
     // 10. search-then-compute
     const passSearchComp = await createStrippedDoc(buffer, "The liability cap is 50,000");
@@ -331,14 +404,10 @@ describe("F2-F8 Guard Tests", () => {
     // 1. Adeu Output Schema
     const goodAdeu = [
       { type: "modify", target_text: "Seller", new_text: "Vendor" },
-      { type: "accept", target_id: "Chg:12" }
+      { type: "accept", target_id: "Chg:12" },
     ];
-    const badAdeuMissingField = [
-      { type: "modify", target_text: "Seller" }
-    ];
-    const badAdeuWrongType = [
-      { type: "modify", target_text: "Seller", new_text: 1234 }
-    ];
+    const badAdeuMissingField = [{ type: "modify", target_text: "Seller" }];
+    const badAdeuWrongType = [{ type: "modify", target_text: "Seller", new_text: 1234 }];
 
     expect(AdeuOutputSchema.safeParse(goodAdeu).success).toBe(true);
     expect(AdeuOutputSchema.safeParse(badAdeuMissingField).success).toBe(false);
@@ -349,9 +418,9 @@ describe("F2-F8 Guard Tests", () => {
       type: "object",
       properties: {
         file_path: { type: "string" },
-        lines: { type: "integer" }
+        lines: { type: "integer" },
       },
-      required: ["file_path"]
+      required: ["file_path"],
     };
     const cleaned = cleanSchema(rawSchema);
     expect(cleaned.type).toBe(SchemaType.OBJECT);
@@ -363,7 +432,7 @@ describe("F2-F8 Guard Tests", () => {
     const trialsList = [
       { latencyMs: 100, tokensIn: 50, tokensOut: 10, fidelity: 100 },
       { latencyMs: 200, tokensIn: 60, tokensOut: 20, fidelity: 80 },
-      { latencyMs: 300, tokensIn: 70, tokensOut: 30, fidelity: 90 }
+      { latencyMs: 300, tokensIn: 70, tokensOut: 30, fidelity: 90 },
     ];
 
     const repCount = trialsList.length;
@@ -405,7 +474,9 @@ describe("F2-F8 Guard Tests", () => {
       return files.flat();
     }
 
-    const srcFiles = getFiles(path.join(root, "src")).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
+    const srcFiles = getFiles(path.join(root, "src")).filter(
+      (f) => f.endsWith(".ts") && !f.endsWith(".test.ts"),
+    );
     filesToSearch.push(...srcFiles);
 
     for (const filePath of filesToSearch) {
@@ -611,49 +682,96 @@ describe("F2-F8 Guard Tests", () => {
               response: {
                 usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10 },
                 candidates: [
-                  { content: { parts: [{ functionCall: { name: "grep", args: { pattern: "Seller", file_path: docPath } } }] } }
+                  {
+                    content: {
+                      parts: [
+                        {
+                          functionCall: {
+                            name: "grep",
+                            args: { pattern: "Seller", file_path: docPath },
+                          },
+                        },
+                      ],
+                    },
+                  },
                 ],
-                functionCalls: () => [{ name: "grep", args: { pattern: "Seller", file_path: docPath } }]
-              }
+                functionCalls: () => [
+                  { name: "grep", args: { pattern: "Seller", file_path: docPath } },
+                ],
+              },
             };
           } else if (turn === 2) {
             return {
               response: {
                 usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 12 },
                 candidates: [
-                  { content: { parts: [{ functionCall: { name: "replace_text", args: { target_paragraph_id: "_bk_e23f91f98915", old_string: "Seller", new_string: "Vendor", instruction: "Update terminology to Vendor", file_path: docPath } } }] } }
+                  {
+                    content: {
+                      parts: [
+                        {
+                          functionCall: {
+                            name: "replace_text",
+                            args: {
+                              target_paragraph_id: "_bk_e23f91f98915",
+                              old_string: "Seller",
+                              new_string: "Vendor",
+                              instruction: "Update terminology to Vendor",
+                              file_path: docPath,
+                            },
+                          },
+                        },
+                      ],
+                    },
+                  },
                 ],
-                functionCalls: () => [{ name: "replace_text", args: { target_paragraph_id: "_bk_e23f91f98915", old_string: "Seller", new_string: "Vendor", instruction: "Update terminology to Vendor", file_path: docPath } }]
-              }
+                functionCalls: () => [
+                  {
+                    name: "replace_text",
+                    args: {
+                      target_paragraph_id: "_bk_e23f91f98915",
+                      old_string: "Seller",
+                      new_string: "Vendor",
+                      instruction: "Update terminology to Vendor",
+                      file_path: docPath,
+                    },
+                  },
+                ],
+              },
             };
           } else if (turn === 3) {
             return {
               response: {
                 usageMetadata: { promptTokenCount: 140, candidatesTokenCount: 15 },
                 candidates: [
-                  { content: { parts: [{ functionCall: { name: "save", args: { save_to_local_path: docPath } } }] } }
+                  {
+                    content: {
+                      parts: [
+                        { functionCall: { name: "save", args: { save_to_local_path: docPath } } },
+                      ],
+                    },
+                  },
                 ],
-                functionCalls: () => [{ name: "save", args: { save_to_local_path: docPath } }]
-              }
+                functionCalls: () => [{ name: "save", args: { save_to_local_path: docPath } }],
+              },
             };
           } else {
             return {
               response: {
                 usageMetadata: { promptTokenCount: 150, candidatesTokenCount: 5 },
                 candidates: [],
-                functionCalls: () => []
-              }
+                functionCalls: () => [],
+              },
             };
           }
         };
-      })()
+      })(),
     };
 
     const mockGemini = {
       getGenerativeModel: (config: any) => {
         capturedTools = config.tools;
         return mockModel;
-      }
+      },
     } as any;
 
     const loopRes = await runSafeDocxLoop(
@@ -661,7 +779,7 @@ describe("F2-F8 Guard Tests", () => {
       "gemini-3.5-flash",
       docPath,
       "surgical-correction",
-      "Update Seller to Vendor"
+      "Update Seller to Vendor",
     );
 
     // 1. Verify that the agent gets to see the tool use instructions from the MCP

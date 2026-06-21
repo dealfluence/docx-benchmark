@@ -29,23 +29,31 @@ async function inspectGolden() {
       (id) => !defaultStyles.some((d) => d.toLowerCase() === id.toLowerCase()),
     );
     console.log(`- Styles: Found ${styleIds.length} styles.`);
-    console.log(`  -> Custom Styles (${customStyles.length}): ${customStyles.length > 0 ? customStyles.join(", ") : "None"}`);
+    console.log(
+      `  -> Custom Styles (${customStyles.length}): ${customStyles.length > 0 ? customStyles.join(", ") : "None"}`,
+    );
     if (customStyles.length === 0) {
-      console.warn("  [WARNING] No custom styles found. Styles fidelity sub-score will be vacuous!");
+      console.warn(
+        "  [WARNING] No custom styles found. Styles fidelity sub-score will be vacuous!",
+      );
     }
 
     // 2. Headers/Footers
     const hasHdFt = hasHeaderOrFooter(doc);
     console.log(`- Headers/Footers: ${hasHdFt ? "PRESENT" : "ABSENT"}`);
     if (!hasHdFt) {
-      console.warn("  [WARNING] No headers or footers found. Headers/footers fidelity sub-score will be vacuous!");
+      console.warn(
+        "  [WARNING] No headers or footers found. Headers/footers fidelity sub-score will be vacuous!",
+      );
     }
 
     // 3. Comments
     const hasComments = doc.pkg.parts.some((p) => p.partname.includes("comments"));
     console.log(`- Margin Comments: ${hasComments ? "PRESENT" : "ABSENT"}`);
     if (!hasComments) {
-      console.warn("  [WARNING] No margin comment threads found. Comments fidelity sub-score will be vacuous!");
+      console.warn(
+        "  [WARNING] No margin comment threads found. Comments fidelity sub-score will be vacuous!",
+      );
     }
 
     // 4. Tracked Revisions
@@ -54,7 +62,9 @@ async function inspectGolden() {
     const delCount = (docXml.match(/<w:del\s/g) || []).length;
     console.log(`- Tracked Revisions: Insertions (${insCount}), Deletions (${delCount})`);
     if (insCount === 0 && delCount === 0) {
-      console.warn("  [WARNING] No tracked changes found. Tracked revisions fidelity sub-score will be vacuous!");
+      console.warn(
+        "  [WARNING] No tracked changes found. Tracked revisions fidelity sub-score will be vacuous!",
+      );
     }
 
     console.log("\n=== END OF INSPECTION ===\n");
