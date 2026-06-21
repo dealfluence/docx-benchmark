@@ -54,29 +54,6 @@ export const MD_LIVE_SYSTEM_PROMPT = `You are an expert contract editor. You are
 Perform the requested edits and return the ENTIRE updated Markdown document. Do not truncate the document, as it must be completely round-tripped back to DOCX.
 Ensure your response contains ONLY the Markdown text. Do not wrap it in any explanation.`;
 
-// Pricing structure
-export interface ModelPricing {
-  inputCostPerMillion: number;
-  outputCostPerMillion: number;
-}
-
-export const MODEL_PRICING: Record<string, ModelPricing> = {
-  "gpt-4o-mini": { inputCostPerMillion: 0.15, outputCostPerMillion: 0.60 },
-  "claude-3-5-haiku-20241022": { inputCostPerMillion: 0.80, outputCostPerMillion: 4.00 },
-  "gemini-1.5-flash": { inputCostPerMillion: 0.075, outputCostPerMillion: 0.30 },
-  "gemini-2.5-flash": { inputCostPerMillion: 0.075, outputCostPerMillion: 0.30 },
-  "gemini-3.5-flash": { inputCostPerMillion: 0.075, outputCostPerMillion: 0.30 },
-};
-
-export const FALLBACK_PRICING: ModelPricing = {
-  inputCostPerMillion: 3.00,
-  outputCostPerMillion: 15.00,
-};
-
-export function getModelPricing(modelName: string): ModelPricing {
-  return MODEL_PRICING[modelName] || FALLBACK_PRICING;
-}
-
 // Timeout configuration (in milliseconds)
 export const GEMINI_TIMEOUT_MS = process.env.GEMINI_TIMEOUT_MS ? parseInt(process.env.GEMINI_TIMEOUT_MS, 10) : 60000;
 export const MCP_CONNECT_TIMEOUT_MS = process.env.MCP_CONNECT_TIMEOUT_MS ? parseInt(process.env.MCP_CONNECT_TIMEOUT_MS, 10) : 30000;
@@ -228,7 +205,6 @@ interface SingleTrialRun {
   fidelity: number;
   xmlDelta: number;
   success: boolean;
-  cost: number;
   roundTrips: number;
   turnsToSuccess: number;
   recoveryRate: number;
@@ -263,11 +239,6 @@ export interface LiveTrialSummary {
   totalTokensMean: number;
   totalTokensMin: number;
   totalTokensMax: number;
-  
-  costMean: number;
-  costMin: number;
-  costMax: number;
-  costRateUsed: ModelPricing;
   
   xmlDeltaMean: number;
   xmlDeltaMin: number;
@@ -403,7 +374,6 @@ export async function runLiveBenchmark() {
 
     for (const clientWrapper of clients) {
       const { provider, client, model } = clientWrapper;
-      const pricing = getModelPricing(model);
 
       // Filter scenarios for --quick mode: 1 simple + 1 agentic
       const activeScenarios = isQuick
@@ -639,7 +609,6 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
                 fidelity: 0,
                 xmlDelta: 0,
                 success: false,
-                cost: 0,
                 roundTrips: 0,
                 turnsToSuccess: 0,
                 recoveryRate: 0,
@@ -652,8 +621,6 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
               continue;
             }
 
-            const cost = (tokensIn * pricing.inputCostPerMillion + tokensOut * pricing.outputCostPerMillion) / 1000000;
-
             trials.push({
               repIndex: rep,
               latencyMs,
@@ -663,7 +630,6 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
               fidelity,
               xmlDelta,
               success,
-              cost,
               roundTrips,
               turnsToSuccess,
               recoveryRate,
@@ -682,7 +648,6 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
           const tokensIns = trials.map((t) => t.tokensIn);
           const tokensOuts = trials.map((t) => t.tokensOut);
           const totalToks = trials.map((t) => t.tokensIn + t.tokensOut);
-          const costs = trials.map((t) => t.cost);
           const fidelities = trials.map((t) => t.fidelity);
           const xmlDeltas = trials.map((t) => t.xmlDelta || 0);
           const roundTripsList = trials.map((t) => t.roundTrips);
@@ -707,10 +672,6 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
           const totalTokensMean = totalToks.reduce((a, b) => a + b, 0) / repCount;
           const totalTokensMin = Math.min(...totalToks);
           const totalTokensMax = Math.max(...totalToks);
-
-          const costMean = costs.reduce((a, b) => a + b, 0) / repCount;
-          const costMin = Math.min(...costs);
-          const costMax = Math.max(...costs);
 
           const fidelityMean = fidelities.reduce((a, b) => a + b, 0) / repCount;
           const fidelityMin = Math.min(...fidelities);
@@ -763,10 +724,6 @@ Review Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) :
             totalTokensMean,
             totalTokensMin,
             totalTokensMax,
-            costMean,
-            costMin,
-            costMax,
-            costRateUsed: pricing,
             xmlIntegrityRate,
             xmlDeltaMean,
             xmlDeltaMin,
@@ -1290,8 +1247,6 @@ function printLiveConsoleSummary(summaries: LiveTrialSummary[]) {
     const latencyMax = s.latencyMaxMs / 1000;
     const latencyStr = `${latencyMean.toFixed(1)}s [${latencyMin.toFixed(1)}–${latencyMax.toFixed(1)}]`;
 
-    const costStr = `$${s.costMean.toFixed(5)} [$${s.costMin.toFixed(5)}–$${s.costMax.toFixed(5)}]`;
-
     const fidelityStr = `${s.fidelityMean.toFixed(1)}% [${s.fidelityMin}–${s.fidelityMax}]`;
 
     const xmlDeltaStr = `${s.xmlDeltaMean.toFixed(0)} [${s.xmlDeltaMin}–${s.xmlDeltaMax}]`;
@@ -1330,7 +1285,7 @@ function printLiveConsoleSummary(summaries: LiveTrialSummary[]) {
       "Tokens In": inputTokensStr,
       "Tokens Out": outputTokensStr,
       "Total Tokens": totalTokensStr,
-      "Cost": costStr,
+      "Cost": "UNKNOWN",
       "Latency": latencyStr,
     };
   });
@@ -1369,14 +1324,6 @@ function writeLiveResultsFiles(summaries: LiveTrialSummary[]) {
   }
   md += `\n`;
 
-  md += `## Cost Formulas\n`;
-  const pricingRates = Array.from(new Set(summaries.map((s) => JSON.stringify({ model: s.model, rates: s.costRateUsed }))));
-  for (const p of pricingRates) {
-    const obj = JSON.parse(p);
-    md += `- **${obj.model}**: Input: $${obj.rates.inputCostPerMillion.toFixed(3)}/M, Output: $${obj.rates.outputCostPerMillion.toFixed(3)}/M\n`;
-  }
-  md += `\n`;
-
   md += `## Comparative Metrics\n\n`;
   md += `> [Spacer alert note showing conditions of token savings]\n`;
   md += `> [!IMPORTANT]\n`;
@@ -1400,8 +1347,7 @@ function writeLiveResultsFiles(summaries: LiveTrialSummary[]) {
 
       const fidelityStr = `${s.fidelityMean.toFixed(1)}% [${s.fidelityMin}–${s.fidelityMax}]`;
       const xmlDeltaStr = `${s.xmlDeltaMean.toFixed(0)} [${s.xmlDeltaMin}–${s.xmlDeltaMax}]`;
-      const costStr = `$${s.costMean.toFixed(5)} [$${s.costMin.toFixed(5)}–$${s.costMax.toFixed(5)}]`;
-
+      
       let inputTokensStr = "";
       let totalTokensStr = "";
 
@@ -1422,7 +1368,7 @@ function writeLiveResultsFiles(summaries: LiveTrialSummary[]) {
 
       const outputTokensStr = `${Math.round(s.tokensOutMean).toLocaleString()} [${Math.round(s.tokensOutMin).toLocaleString()}–${Math.round(s.tokensOutMax).toLocaleString()}]`;
 
-      md += `| **${s.paradigm}** | ${s.docSize} | ${s.successRate} | ${xmlDeltaStr} | ${fidelityStr} | ${s.xmlIntegrityRate} | ${s.roundTripsMean.toFixed(1)} | ${s.turnsToSuccessMean.toFixed(1)} | ${(s.recoveryRateMean * 100).toFixed(1)}% | ${inputTokensStr} | ${outputTokensStr} | ${totalTokensStr} | ${costStr} | ${latencyStr} |\n`;
+      md += `| **${s.paradigm}** | ${s.docSize} | ${s.successRate} | ${xmlDeltaStr} | ${fidelityStr} | ${s.xmlIntegrityRate} | ${s.roundTripsMean.toFixed(1)} | ${s.turnsToSuccessMean.toFixed(1)} | ${(s.recoveryRateMean * 100).toFixed(1)}% | ${inputTokensStr} | ${outputTokensStr} | ${totalTokensStr} | UNKNOWN | ${latencyStr} |\n`;
     }
     md += `\n`;
   }
