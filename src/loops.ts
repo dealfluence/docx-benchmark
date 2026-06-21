@@ -1,0 +1,436 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { performance } from "node:perf_hooks";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { DocumentObject } from "@adeu/core";
+import { checkScenarioSuccess } from "./success.js";
+import {
+  withTimeout,
+  cleanSchema,
+  GEMINI_TIMEOUT_MS,
+  MCP_CONNECT_TIMEOUT_MS,
+  MCP_TOOL_TIMEOUT_MS,
+} from "./utils/gemini.js";
+
+export interface LoopResult {
+  tokensIn: number;
+  tokensOut: number;
+  roundTrips: number;
+  turnsToSuccess: number;
+  recoveryRate: number;
+  finalBuffer: Buffer;
+  success: boolean;
+  schemaTokens?: number;
+  historyTokens?: number;
+  newContentTokens?: number;
+}
+
+export interface UnifiedLoopConfig {
+  gemini: GoogleGenerativeAI;
+  modelName: string;
+  systemPrompt: string;
+  maxTurns: number;
+  tools: any[];
+  executeTool: (
+    name: string,
+    args: any,
+    turn: number,
+  ) => Promise<{ result?: any; error?: string; hadError: boolean }>;
+  checkSuccess: (turn: number) => Promise<boolean>;
+  getFinalBuffer: () => Promise<Buffer>;
+  cleanup: () => Promise<void>;
+  loopName?: string;
+}
+
+export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<LoopResult> {
+  const {
+    gemini,
+    modelName,
+    systemPrompt,
+    maxTurns,
+    tools,
+    executeTool,
+    checkSuccess,
+    getFinalBuffer,
+    cleanup,
+    loopName,
+  } = config;
+
+  const modelInstance = gemini.getGenerativeModel(
+    {
+      model: modelName,
+      generationConfig: { temperature: 0.0 },
+      tools: tools.length > 0 ? [{ functionDeclarations: tools }] : undefined,
+    },
+    { timeout: GEMINI_TIMEOUT_MS },
+  );
+
+  const contents: any[] = [
+    {
+      role: "user",
+      parts: [{ text: systemPrompt }],
+    },
+  ];
+
+  let tokensIn = 0;
+  let tokensOut = 0;
+  let roundTrips = 0;
+  let turnsToSuccess = 0;
+  let errorTurns = 0;
+  let recoveryTurns = 0;
+  let previousTurnHadError = false;
+  let success = false;
+
+  let schemaTokensPerTurn = 0;
+  if (tools.length > 0) {
+    try {
+      const modelNoTools = gemini.getGenerativeModel({ model: modelName });
+      const modelWithTools = gemini.getGenerativeModel({
+        model: modelName,
+        tools: [{ functionDeclarations: tools }],
+      });
+      const testContent = [{ role: "user", parts: [{ text: "hello" }] }];
+      const countNoTools = await modelNoTools.countTokens({ contents: testContent });
+      const countWithTools = await modelWithTools.countTokens({ contents: testContent });
+      schemaTokensPerTurn = Math.max(0, countWithTools.totalTokens - countNoTools.totalTokens);
+    } catch {
+      schemaTokensPerTurn = 2500;
+    }
+  }
+
+  let schemaTokens = 0;
+  let historyTokens = 0;
+  let newContentTokens = 0;
+  let historyAccumulated = 0;
+  let finalBuffer: Buffer | null = null;
+
+  try {
+    for (let turn = 1; turn <= maxTurns; turn++) {
+      const prefix = loopName ? `[${loopName} Turn ${turn}]` : `[Loop Turn ${turn}]`;
+      console.log(
+        `\x1b[36m${prefix}\x1b[0m Sending prompt content length: ${contents.length} messages.`,
+      );
+
+      const geminiResponse = await withTimeout(
+        modelInstance.generateContent({ contents }),
+        GEMINI_TIMEOUT_MS,
+        `Gemini API call timed out after ${GEMINI_TIMEOUT_MS}ms`,
+      );
+
+      const promptTokensThisTurn = geminiResponse.response.usageMetadata?.promptTokenCount || 0;
+      const candidatesTokensThisTurn =
+        geminiResponse.response.usageMetadata?.candidatesTokenCount || 0;
+
+      tokensIn += promptTokensThisTurn;
+      tokensOut += candidatesTokensThisTurn;
+
+      const sTokens = Math.min(schemaTokensPerTurn, promptTokensThisTurn);
+      const hTokens = Math.min(historyAccumulated, promptTokensThisTurn - sTokens);
+      const nTokens = promptTokensThisTurn - sTokens - hTokens;
+
+      schemaTokens += sTokens;
+      historyTokens += hTokens;
+      newContentTokens += nTokens;
+      historyAccumulated = hTokens + nTokens + candidatesTokensThisTurn;
+
+      const parts = geminiResponse.response.candidates?.[0]?.content?.parts || [];
+      const functionCalls = geminiResponse.response.functionCalls() || [];
+
+      console.log(
+        `\x1b[36m${prefix}\x1b[0m Model generated ${parts.length} parts and ${functionCalls.length} function calls.`,
+      );
+      for (const fc of functionCalls) {
+        console.log(
+          `\x1b[36m${prefix}\x1b[0m Tool Call Request: \x1b[33m${fc.name}\x1b[0m with args:`,
+          JSON.stringify(fc.args),
+        );
+      }
+
+      if (functionCalls.length === 0) {
+        console.log(`\x1b[36m${prefix}\x1b[0m No function calls generated. Breaking loop.`);
+        break;
+      }
+
+      roundTrips++;
+      contents.push({ role: "model", parts });
+
+      const functionResponses: any[] = [];
+      let currentTurnHadError = false;
+
+      for (const fc of functionCalls) {
+        try {
+          const toolResult = await executeTool(fc.name, fc.args, turn);
+          if (toolResult.hadError) currentTurnHadError = true;
+          functionResponses.push({
+            name: fc.name,
+            response: toolResult.error ? { error: toolResult.error } : toolResult.result,
+          });
+        } catch (err) {
+          currentTurnHadError = true;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.error(`\x1b[31m${prefix} ERROR in Tool Response for ${fc.name}:\x1b[0m`, errMsg);
+          functionResponses.push({
+            name: fc.name,
+            response: { error: errMsg },
+          });
+        }
+      }
+
+      contents.push({
+        role: "user",
+        parts: functionResponses.map((fr) => ({ functionResponse: fr })),
+      });
+
+      if (currentTurnHadError) {
+        errorTurns++;
+      } else if (previousTurnHadError) {
+        recoveryTurns++;
+      }
+      previousTurnHadError = currentTurnHadError;
+
+      try {
+        const isSuccessNow = await checkSuccess(turn);
+        if (isSuccessNow && !success) {
+          success = true;
+          turnsToSuccess = turn;
+        }
+      } catch {
+        // ignore
+      }
+    }
+  } finally {
+    try {
+      finalBuffer = await getFinalBuffer();
+    } catch {
+      // ignore
+    }
+    await cleanup();
+  }
+
+  const recoveryRate = errorTurns > 0 ? recoveryTurns / errorTurns : 0;
+
+  return {
+    tokensIn,
+    tokensOut,
+    roundTrips,
+    turnsToSuccess: success ? turnsToSuccess : maxTurns,
+    recoveryRate,
+    finalBuffer: finalBuffer || Buffer.alloc(0),
+    success,
+    schemaTokens,
+    historyTokens,
+    newContentTokens,
+  };
+}
+
+export async function connectMcpClient(packageName: string, clientName: string) {
+  const transport = new StdioClientTransport({
+    command: "npx",
+    args: ["-y", packageName],
+  });
+  const mcpClient = new Client({ name: clientName, version: "1.0.0" }, { capabilities: {} });
+  await withTimeout(
+    mcpClient.connect(transport),
+    MCP_CONNECT_TIMEOUT_MS,
+    `${clientName} connection timed out after ${MCP_CONNECT_TIMEOUT_MS}ms`,
+  );
+  const toolsResponse = await withTimeout(
+    mcpClient.listTools(),
+    MCP_TOOL_TIMEOUT_MS,
+    `${clientName} listTools timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
+  );
+  return { mcpClient, tools: toolsResponse.tools };
+}
+
+export const mapToGeminiTools = (tools: any[]) =>
+  tools.map((t) => ({
+    name: t.name,
+    description: t.description || "",
+    parameters: cleanSchema(t.inputSchema),
+  }));
+
+export function bindArgsToTempPath(args: any, properties: any, tempFilePath: string): any {
+  const cleanArgs = { ...args };
+  for (const key of ["file_path", "path", "save_to_local_path"]) {
+    if (key in properties) {
+      cleanArgs[key] = tempFilePath;
+    }
+  }
+  return cleanArgs;
+}
+
+export function isMcpToolSuccess(toolResult: any): boolean {
+  if (toolResult.isError) return false;
+  const textContent = toolResult.content?.[0]?.text || "";
+  return !(textContent.includes('"success": false') || textContent.includes('"error"'));
+}
+
+export async function runSafeDocxLoop(
+  gemini: GoogleGenerativeAI,
+  modelName: string,
+  docPath: string,
+  scenarioId: string,
+  taskDescription: string,
+): Promise<LoopResult> {
+  const MAX_TURNS = 8;
+  const tempFilePath = path.resolve(`./temp_safe_docx_rep_${performance.now()}.docx`);
+  fs.copyFileSync(docPath, tempFilePath);
+
+  const { mcpClient, tools: mcpTools } = await connectMcpClient(
+    "@usejunior/safe-docx",
+    "benchmark-client",
+  );
+  const geminiTools = mapToGeminiTools(mcpTools);
+
+  const systemPrompt = `You are an expert contract editor editing a Microsoft Word document (.docx) using the provided Safe Docx MCP tools.
+The document is currently located at path: "${tempFilePath}".
+Your task is: ${taskDescription}
+
+You must be highly efficient and minimize the number of tool calls and conversation turns.
+Follow this precise strategy:
+1. Locate the content to change by calling 'grep' with a specific pattern. Do NOT read the entire document if not needed.
+2. Edit the document content using 'replace_text' or 'batch_edit' (if multiple edits are needed). Ensure your edits are precise. If multiple edits are required, perform them in batch or in a single turn if possible.
+3. Save the document by calling 'save' immediately after editing.
+4. Stop calling tools once saved.
+
+Do not re-read the entire document after editing unless strictly necessary. Do not wander or take unnecessary turns. Your goal is to finish the task in 2-3 turns.`;
+
+  const originalDoc = await DocumentObject.load(fs.readFileSync(docPath));
+
+  return runUnifiedAgenticLoop({
+    gemini,
+    modelName,
+    systemPrompt,
+    maxTurns: MAX_TURNS,
+    tools: geminiTools,
+    loopName: "Safe Docx Loop",
+    executeTool: async (name, args) => {
+      const toolDef = mcpTools.find((t) => t.name === name);
+      const cleanArgs = bindArgsToTempPath(
+        args,
+        (toolDef?.inputSchema as any)?.properties || {},
+        tempFilePath,
+      );
+      if (name === "save") {
+        cleanArgs.allow_overwrite = true;
+      }
+
+      const toolResult = await withTimeout(
+        mcpClient.callTool({
+          name,
+          arguments: cleanArgs,
+        }),
+        MCP_TOOL_TIMEOUT_MS,
+        `MCP tool call '${name}' timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
+      );
+
+      console.log(
+        `[MCP TOOL CALL] Name: ${name}, Arguments: ${JSON.stringify(cleanArgs)}, Result: ${JSON.stringify(toolResult)}`,
+      );
+
+      return {
+        result: { result: (toolResult as any).content },
+        hadError: !isMcpToolSuccess(toolResult),
+      };
+    },
+    checkSuccess: async () => {
+      const currentBuffer = fs.readFileSync(tempFilePath);
+      const currentDoc = await DocumentObject.load(currentBuffer);
+      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc);
+    },
+    getFinalBuffer: async () => {
+      return fs.existsSync(tempFilePath) ? fs.readFileSync(tempFilePath) : fs.readFileSync(docPath);
+    },
+    cleanup: async () => {
+      await mcpClient.close();
+      if (fs.existsSync(tempFilePath)) {
+        fs.unlinkSync(tempFilePath);
+      }
+    },
+  });
+}
+
+export async function runAdeuLoop(
+  gemini: GoogleGenerativeAI,
+  modelName: string,
+  docBuffer: Buffer,
+  scenarioId: string,
+  taskDescription: string,
+): Promise<LoopResult> {
+  const MAX_TURNS = 15;
+  const tempFilePath = path.resolve(`./temp_adeu_rep_${performance.now()}.docx`);
+  fs.writeFileSync(tempFilePath, docBuffer);
+
+  const { mcpClient, tools: mcpTools } = await connectMcpClient(
+    "@adeu/mcp-server",
+    "adeu-benchmark-client",
+  );
+  const geminiTools = mapToGeminiTools(mcpTools);
+
+  const systemPrompt = `You are an expert contract editor editing a Microsoft Word document (.docx) using Adeu Virtual DOM.
+The document is currently located at path: "${tempFilePath}".
+Your task is: ${taskDescription}
+
+Please observe the document first by calling the 'read_document' tool, analyze the content, then perform edits by calling 'apply_patch' with transactional modifications.
+
+You MUST call 'read_document' a second time after applying a patch to verify that your changes were successfully applied and the correct text is present in the updated document.
+
+CRITICAL INSTRUCTIONS FOR STOPPING:
+1. Once you have verified that the text of your edits is present in the document, you MUST stop calling tools immediately. DO NOT call any more tools (do not call 'read_document' or 'apply_patch' again).
+2. The CriticMarkup tags (such as '{++' and '++}' for inserted text, or '{--' and '--}' for deleted text) represent the track changes of your edits. These are normal, expected, and correct.
+3. Even if the 'read_document' output shows complex tracked changes (such as headings or paragraph breaks marked as deleted, split, or inserted), DO NOT attempt to "clean up", "fix", accept, or reject these tracked changes. DO NOT make any further edits to improve formatting or structure.
+4. As long as your text is in the document, simply output a final message in plain text confirming that the task is complete. This will end your turn.`;
+
+  const originalDoc = await DocumentObject.load(docBuffer);
+
+  return runUnifiedAgenticLoop({
+    gemini,
+    modelName,
+    systemPrompt,
+    maxTurns: MAX_TURNS,
+    tools: geminiTools,
+    loopName: "Adeu Loop",
+    executeTool: async (name, args) => {
+      const toolDef = mcpTools.find((t) => t.name === name);
+      const cleanArgs = bindArgsToTempPath(
+        args,
+        (toolDef?.inputSchema as any)?.properties || {},
+        tempFilePath,
+      );
+
+      const toolResult = await withTimeout(
+        mcpClient.callTool({
+          name,
+          arguments: cleanArgs,
+        }),
+        MCP_TOOL_TIMEOUT_MS,
+        `Adeu MCP tool call '${name}' timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
+      );
+
+      console.log(
+        `[Adeu MCP TOOL CALL] Name: ${name}, Arguments: ${JSON.stringify(cleanArgs)}, Result: ${JSON.stringify(toolResult)}`,
+      );
+
+      return {
+        result: { result: (toolResult as any).content },
+        hadError: !isMcpToolSuccess(toolResult),
+      };
+    },
+    checkSuccess: async () => {
+      const currentBuffer = fs.readFileSync(tempFilePath);
+      const currentDoc = await DocumentObject.load(currentBuffer);
+      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc);
+    },
+    getFinalBuffer: async () => {
+      return fs.existsSync(tempFilePath) ? fs.readFileSync(tempFilePath) : docBuffer;
+    },
+    cleanup: async () => {
+      await mcpClient.close();
+      if (fs.existsSync(tempFilePath)) {
+        fs.unlinkSync(tempFilePath);
+      }
+    },
+  });
+}

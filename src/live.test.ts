@@ -6,7 +6,14 @@ import {
   validateXmlSyntax,
   cleanJsonResponse,
   applyXmlSearchReplace,
+  AdeuOutputSchema,
+  cleanSchema
 } from "./live.js";
+
+import { mapSchemaType, withTimeout } from "./utils/gemini.js";
+import { getStats, formatTokenMetric, getFullTaskDescription } from "./reporting.js";
+import { SchemaType } from "@google/generative-ai";
+
 import { getGoldenDocxPath } from "./baselines.js";
 import { checkScenarioSuccess } from "./success.js";
 import { evaluateFidelity, createStrippedDoc } from "./fidelity.js";
@@ -93,9 +100,125 @@ describe("success criteria and evaluation", () => {
   });
 });
 
+describe("focused xml and parsing utilities", () => {
+  it("should handle applyXmlSearchReplace with lenient spaces and newlines", () => {
+    const original = "<w:p>  <w:r>hello</w:r>  </w:p>";
+    const response = `<<<<<<< SEARCH\n<w:p>  <w:r>hello</w:r>  </w:p>\n=======\n<w:p><w:r>world</w:r></w:p>\n>>>>>>> REPLACE`;
+    expect(applyXmlSearchReplace(original, response)).toContain("world");
+  });
+
+  it("should throw custom error when SEARCH block is missing", () => {
+    const original = "<w:p>hello</w:p>";
+    const response = `<<<<<<< SEARCH\nnonexistent\n=======\nreplacement\n>>>>>>> REPLACE`;
+    expect(() => applyXmlSearchReplace(original, response)).toThrow("Could not find search block in the XML");
+  });
+
+  it("should return original text if search headers are present but parse fails with bad boundary blocks", () => {
+    const original = "<w:p>hello</w:p>";
+    const response = "This has <<<<<<< SEARCH headers but missing REPLACE footer";
+    expect(() => applyXmlSearchReplace(original, response)).toThrow("Found SEARCH/REPLACE headers but failed to parse them cleanly.");
+  });
+
+  it("should gracefully return original response if SEARCH string is not found but block structure is missing", () => {
+    const original = "<w:p>hello</w:p>";
+    const response = "This is a raw xml response without search blocks";
+    expect(applyXmlSearchReplace(original, response)).toBe(response);
+  });
+
+  it("should clean nested or multiple backtick JSON blocks safely", () => {
+    const dirty = "```json\n```json\n[]\n```\n```";
+    const cleaned = cleanJsonResponse(dirty);
+    expect(cleaned).toBe("```json\n[]\n```");
+  });
+});
+
+describe("focused gemini and schema utilities", () => {
+  it("should map any string to a SchemaType", () => {
+    expect(mapSchemaType("object")).toBe(SchemaType.OBJECT);
+    expect(mapSchemaType("array")).toBe(SchemaType.ARRAY);
+    expect(mapSchemaType("string")).toBe(SchemaType.STRING);
+    expect(mapSchemaType("integer")).toBe(SchemaType.INTEGER);
+    expect(mapSchemaType("boolean")).toBe(SchemaType.BOOLEAN);
+    expect(mapSchemaType("unknown_type_fallback")).toBe(SchemaType.STRING);
+  });
+
+  it("should clean complex schema union properties cleanly", () => {
+    const unionSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+          },
+          required: ["name"],
+        },
+        {
+          type: "object",
+          properties: {
+            age: { type: "integer" },
+          },
+          required: ["name"],
+        },
+      ],
+    };
+    const cleaned = cleanSchema(unionSchema);
+    expect(cleaned.type).toBe(SchemaType.OBJECT);
+    expect(cleaned.properties.name.type).toBe(SchemaType.STRING);
+    expect(cleaned.properties.age.type).toBe(SchemaType.INTEGER);
+    expect(cleaned.required).toEqual(["name"]);
+  });
+
+  it("should execute withTimeout correctly under resolution", async () => {
+    const result = await withTimeout(Promise.resolve("hello"), 50, "fail");
+    expect(result).toBe("hello");
+  });
+
+  it("should execute withTimeout correctly under timeout triggering", async () => {
+    const longPromise = new Promise((resolve) => setTimeout(() => resolve("late"), 200));
+    await expect(withTimeout(longPromise, 10, "timed out!")).rejects.toThrow("timed out!");
+  });
+});
+
+describe("focused reporting and stats utilities", () => {
+  it("should correctly calculate stats metrics", () => {
+    const stats = getStats([10, 20, 30]);
+    expect(stats.mean).toBe(20);
+    expect(stats.min).toBe(10);
+    expect(stats.max).toBe(30);
+  });
+
+  it("should handle getStats on single element array safely", () => {
+    const stats = getStats([42]);
+    expect(stats.mean).toBe(42);
+    expect(stats.min).toBe(42);
+    expect(stats.max).toBe(42);
+  });
+
+  it("should format tokens with locale format options", () => {
+    const metric = { mean: 1250000, min: 1000000, max: 1500000 };
+    const formatted = formatTokenMetric(metric, undefined, false, true);
+    expect(formatted).toContain("1,250,000");
+    expect(formatted).toContain("1,000,000");
+    expect(formatted).toContain("1,500,000");
+  });
+
+  it("should construct verbose scenario descriptions cleanly", () => {
+    const mockScenario = {
+      description: "Draft standard terms.",
+      targetText: "old clause",
+      replacementText: "new clause",
+      reviewAction: { type: "accept", targetId: "Chg:9" },
+    };
+    const desc = getFullTaskDescription(mockScenario);
+    expect(desc).toContain("Draft standard terms.");
+    expect(desc).toContain('- Find target text: "old clause"');
+    expect(desc).toContain('- Replace with: "new clause"');
+    expect(desc).toContain('Review Action: {"type":"accept","targetId":"Chg:9"}');
+  });
+});
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { SchemaType } from "@google/generative-ai";
-import { AdeuOutputSchema, cleanSchema, runSafeDocxLoop } from "./live.js";
+import { runSafeDocxLoop } from "./live.js";
 import * as path from "node:path";
 
 describe("fairness and integrity check against hardcoded constants (F1)", () => {
