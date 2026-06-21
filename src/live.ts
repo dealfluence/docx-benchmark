@@ -284,12 +284,13 @@ export async function runLiveBenchmark() {
             const latencyMs = performance.now() - start;
 
             if (apiError) {
+              const apiFailVal: "PASS" | "FAIL" = "FAIL";
               trials.push({
                 repIndex: rep,
                 latencyMs,
                 tokensIn: 0,
                 tokensOut: 0,
-                xmlIntegrity: "FAIL",
+                xmlIntegrity: apiFailVal,
                 fidelity: 0,
                 xmlDelta: 0,
                 success: false,

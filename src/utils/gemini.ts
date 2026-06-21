@@ -86,7 +86,8 @@ export function cleanSchema(schema: any): any {
 
     res.type = consolidatedType;
     res.properties = consolidatedProperties;
-    const commonRequired = consolidatedRequired.filter((reqField: string) =>
+    const uniqueConsolidatedRequired = Array.from(new Set(consolidatedRequired));
+    const commonRequired = uniqueConsolidatedRequired.filter((reqField: string) =>
       unionList.every((sub: any) => sub.required?.includes(reqField)),
     );
     if (commonRequired.length > 0) {

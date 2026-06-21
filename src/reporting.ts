@@ -81,7 +81,7 @@ export function formatTokenMetric(
 ): string {
   const f = (val: number) => {
     const rounded = Math.round(val);
-    return useLocale ? rounded.toLocaleString() : String(rounded);
+    return useLocale ? rounded.toLocaleString("en-US") : String(rounded);
   };
   if (isSafeDocx && floorMetric) {
     return `${f(floorMetric.mean)} / ${f(metric.mean)} [${f(floorMetric.min)}-${f(floorMetric.max)} / ${f(metric.min)}-${f(metric.max)}] (floor/total)`;
