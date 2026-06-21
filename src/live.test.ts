@@ -10,7 +10,7 @@ import {
   cleanSchema
 } from "./live.js";
 
-import { mapSchemaType, withTimeout } from "./utils/gemini.js";
+import { mapSchemaType, withTimeout, Schema } from "./utils/gemini.js";
 import { getStats, formatTokenMetric, getFullTaskDescription } from "./reporting.js";
 import { SchemaType } from "@google/generative-ai";
 
@@ -161,10 +161,10 @@ describe("focused gemini and schema utilities", () => {
         },
       ],
     };
-    const cleaned = cleanSchema(unionSchema);
+    const cleaned = cleanSchema(unionSchema as unknown as Schema)!;
     expect(cleaned.type).toBe(SchemaType.OBJECT);
-    expect(cleaned.properties.name.type).toBe(SchemaType.STRING);
-    expect(cleaned.properties.age.type).toBe(SchemaType.INTEGER);
+    expect(cleaned.properties!.name.type).toBe(SchemaType.STRING);
+    expect(cleaned.properties!.age.type).toBe(SchemaType.INTEGER);
     expect(cleaned.required).toEqual(["name"]);
   });
 
@@ -207,7 +207,7 @@ describe("focused reporting and stats utilities", () => {
       description: "Draft standard terms.",
       targetText: "old clause",
       replacementText: "new clause",
-      reviewAction: { type: "accept", targetId: "Chg:9" },
+      reviewAction: { type: "accept" as const, targetId: "Chg:9" },
     };
     const desc = getFullTaskDescription(mockScenario);
     expect(desc).toContain("Draft standard terms.");
@@ -545,10 +545,10 @@ describe("F2-F8 Guard Tests", () => {
       },
       required: ["file_path"],
     };
-    const cleaned = cleanSchema(rawSchema);
+    const cleaned = cleanSchema(rawSchema as unknown as Schema)!;
     expect(cleaned.type).toBe(SchemaType.OBJECT);
-    expect(cleaned.properties.file_path.type).toBe(SchemaType.STRING);
-    expect(cleaned.properties.lines.type).toBe(SchemaType.INTEGER);
+    expect(cleaned.properties!.file_path.type).toBe(SchemaType.STRING);
+    expect(cleaned.properties!.lines.type).toBe(SchemaType.INTEGER);
   });
 
   it("F8: Reps plumbing", () => {

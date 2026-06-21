@@ -51,36 +51,50 @@ export const DocumentChangeSchema = z.union([
 
 export const AdeuOutputSchema = z.array(DocumentChangeSchema);
 
+export interface Schema {
+  type?: string | SchemaType;
+  $schema?: string;
+  additionalProperties?: boolean;
+  anyOf?: Schema[];
+  oneOf?: Schema[];
+  properties?: Record<string, Schema>;
+  required?: string[];
+  items?: Schema;
+  description?: string;
+}
+
 export function mapSchemaType(type: string): SchemaType {
-  return (SchemaType as any)[type.toUpperCase()] || SchemaType.STRING;
+  return (SchemaType as unknown as Record<string, SchemaType>)[type.toUpperCase()] || SchemaType.STRING;
 }
 
 /**
  * Normalizes tool schemas to conform with Google Gemini's uppercase SchemaType limitations
  * and flattens array properties declared with `anyOf`/`oneOf`.
  */
-export function cleanSchema(schema: any): any {
+export function cleanSchema(schema: Schema | undefined): Schema | undefined {
   if (!schema) return undefined;
-  const res: any = { ...schema };
+  const res: Schema = { ...schema };
   delete res.$schema;
   delete res.additionalProperties;
 
   const unionList = schema.anyOf || schema.oneOf;
   if (unionList) {
-    const consolidatedProperties: any = {};
+    const consolidatedProperties: Record<string, Schema> = {};
     const consolidatedRequired: string[] = [];
     let consolidatedType = "object";
 
     for (const sub of unionList) {
       const cleanedSub = cleanSchema(sub);
-      if (cleanedSub.properties) {
-        Object.assign(consolidatedProperties, cleanedSub.properties);
-      }
-      if (cleanedSub.required) {
-        consolidatedRequired.push(...cleanedSub.required);
-      }
-      if (cleanedSub.type) {
-        consolidatedType = cleanedSub.type;
+      if (cleanedSub) {
+        if (cleanedSub.properties) {
+          Object.assign(consolidatedProperties, cleanedSub.properties);
+        }
+        if (cleanedSub.required) {
+          consolidatedRequired.push(...cleanedSub.required);
+        }
+        if (cleanedSub.type) {
+          consolidatedType = cleanedSub.type as string;
+        }
       }
     }
 
@@ -88,7 +102,7 @@ export function cleanSchema(schema: any): any {
     res.properties = consolidatedProperties;
     const uniqueConsolidatedRequired = Array.from(new Set(consolidatedRequired));
     const commonRequired = uniqueConsolidatedRequired.filter((reqField: string) =>
-      unionList.every((sub: any) => sub.required?.includes(reqField)),
+      unionList.every((sub: Schema) => sub.required?.includes(reqField)),
     );
     if (commonRequired.length > 0) {
       res.required = commonRequired;
@@ -105,7 +119,10 @@ export function cleanSchema(schema: any): any {
   if (schema.properties) {
     res.properties = {};
     for (const key of Object.keys(schema.properties)) {
-      res.properties[key] = cleanSchema(schema.properties[key]);
+      const prop = schema.properties[key];
+      if (prop) {
+        res.properties[key] = cleanSchema(prop) as Schema;
+      }
     }
   }
   if (schema.items) {

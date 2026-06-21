@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { Scenario } from "./scenarios.js";
 
 export type IntegrityStatus = "PASS" | "FAIL";
 
@@ -61,7 +62,7 @@ export function getStats(arr: number[]): Stats {
   };
 }
 
-export function getFullTaskDescription(scenario: any): string {
+export function getFullTaskDescription(scenario: Partial<Scenario> & { description: string }): string {
   let desc = scenario.description;
   if (scenario.targetText || scenario.replacementText || scenario.reviewAction) {
     desc += `\nInstructions:\n`;

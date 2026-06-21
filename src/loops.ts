@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { performance } from "node:perf_hooks";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, Content, FunctionDeclaration } from "@google/generative-ai";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DocumentObject } from "@adeu/core";
@@ -9,6 +9,7 @@ import { checkScenarioSuccess } from "./success.js";
 import {
   withTimeout,
   cleanSchema,
+  Schema,
   GEMINI_TIMEOUT_MS,
   MCP_CONNECT_TIMEOUT_MS,
   MCP_TOOL_TIMEOUT_MS,
@@ -32,15 +33,15 @@ export interface UnifiedLoopConfig {
   modelName: string;
   systemPrompt: string;
   maxTurns: number;
-  tools: any[];
+  tools: FunctionDeclaration[];
   executeTool: (
     name: string,
-    args: any,
+    args: Record<string, unknown>,
     turn: number,
-  ) => Promise<{ result?: any; error?: string; hadError: boolean }>;
+  ) => Promise<{ result?: unknown; error?: string; hadError: boolean }>;
   checkSuccess: (turn: number) => Promise<boolean>;
   getFinalBuffer: () => Promise<Buffer>;
-  cleanup: () => Promise<void>;
+  cleanup?: () => Promise<void>;
   loopName?: string;
 }
 
@@ -67,7 +68,7 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
     { timeout: GEMINI_TIMEOUT_MS },
   );
 
-  const contents: any[] = [
+  const contents: Content[] = [
     {
       role: "user",
       parts: [{ text: systemPrompt }],
@@ -156,16 +157,18 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
       roundTrips++;
       contents.push({ role: "model", parts });
 
-      const functionResponses: any[] = [];
+      const functionResponses: Array<{ name: string; response: Record<string, unknown> }> = [];
       let currentTurnHadError = false;
 
       for (const fc of functionCalls) {
         try {
-          const toolResult = await executeTool(fc.name, fc.args, turn);
+          const toolResult = await executeTool(fc.name, fc.args as Record<string, unknown>, turn);
           if (toolResult.hadError) currentTurnHadError = true;
           functionResponses.push({
             name: fc.name,
-            response: toolResult.error ? { error: toolResult.error } : toolResult.result,
+            response: toolResult.error
+              ? { error: toolResult.error }
+              : (toolResult.result as Record<string, unknown>),
           });
         } catch (err) {
           currentTurnHadError = true;
@@ -206,7 +209,7 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
     } catch {
       // ignore
     }
-    await cleanup();
+    if (cleanup) await cleanup();
   }
 
   const recoveryRate = errorTurns > 0 ? recoveryTurns / errorTurns : 0;
@@ -244,14 +247,32 @@ export async function connectMcpClient(packageName: string, clientName: string) 
   return { mcpClient, tools: toolsResponse.tools };
 }
 
-export const mapToGeminiTools = (tools: any[]) =>
+interface McpTool {
+  name: string;
+  description?: string;
+  inputSchema?: Schema;
+}
+
+interface McpToolResult {
+  isError?: boolean;
+  content?: Array<{
+    type?: string;
+    text?: string;
+  }>;
+}
+
+export const mapToGeminiTools = (tools: McpTool[]): FunctionDeclaration[] =>
   tools.map((t) => ({
     name: t.name,
     description: t.description || "",
-    parameters: cleanSchema(t.inputSchema),
+    parameters: cleanSchema(t.inputSchema) as FunctionDeclaration["parameters"],
   }));
 
-export function bindArgsToTempPath(args: any, properties: any, tempFilePath: string): any {
+export function bindArgsToTempPath(
+  args: Record<string, unknown>,
+  properties: Record<string, unknown>,
+  tempFilePath: string,
+): Record<string, unknown> {
   const cleanArgs = { ...args };
   for (const key of ["file_path", "path", "save_to_local_path"]) {
     if (key in properties) {
@@ -261,7 +282,7 @@ export function bindArgsToTempPath(args: any, properties: any, tempFilePath: str
   return cleanArgs;
 }
 
-export function isMcpToolSuccess(toolResult: any): boolean {
+export function isMcpToolSuccess(toolResult: McpToolResult): boolean {
   if (toolResult.isError) return false;
   const textContent = toolResult.content?.[0]?.text || "";
   return !(textContent.includes('"success": false') || textContent.includes('"error"'));
@@ -310,7 +331,7 @@ Do not re-read the entire document after editing unless strictly necessary. Do n
       const toolDef = mcpTools.find((t) => t.name === name);
       const cleanArgs = bindArgsToTempPath(
         args,
-        (toolDef?.inputSchema as any)?.properties || {},
+        (toolDef?.inputSchema?.properties as Record<string, unknown>) || {},
         tempFilePath,
       );
       if (name === "save") {
@@ -331,8 +352,8 @@ Do not re-read the entire document after editing unless strictly necessary. Do n
       );
 
       return {
-        result: { result: (toolResult as any).content },
-        hadError: !isMcpToolSuccess(toolResult),
+        result: { result: (toolResult as McpToolResult).content },
+        hadError: !isMcpToolSuccess(toolResult as McpToolResult),
       };
     },
     checkSuccess: async () => {
@@ -396,7 +417,7 @@ CRITICAL INSTRUCTIONS FOR STOPPING:
       const toolDef = mcpTools.find((t) => t.name === name);
       const cleanArgs = bindArgsToTempPath(
         args,
-        (toolDef?.inputSchema as any)?.properties || {},
+        (toolDef?.inputSchema?.properties as Record<string, unknown>) || {},
         tempFilePath,
       );
 
@@ -414,8 +435,8 @@ CRITICAL INSTRUCTIONS FOR STOPPING:
       );
 
       return {
-        result: { result: (toolResult as any).content },
-        hadError: !isMcpToolSuccess(toolResult),
+        result: { result: (toolResult as McpToolResult).content },
+        hadError: !isMcpToolSuccess(toolResult as McpToolResult),
       };
     },
     checkSuccess: async () => {
