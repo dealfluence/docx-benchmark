@@ -336,9 +336,9 @@ function formatTokenMetric(
     return useLocale ? rounded.toLocaleString() : String(rounded);
   };
   if (isSafeDocx) {
-    return `${f(floorMean || 0)} / ${f(mean)} [${f(floorMin || 0)}–${f(floorMax || 0)} / ${f(min)}–${f(max)}] (floor/total)`;
+    return `${f(floorMean || 0)} / ${f(mean)} [${f(floorMin || 0)}-${f(floorMax || 0)} / ${f(min)}-${f(max)}] (floor/total)`;
   }
-  return `${f(mean)} [${f(min)}–${f(max)}]`;
+  return `${f(mean)} [${f(min)}-${f(max)}]`;
 }
 
 export async function runLiveBenchmark() {
@@ -1112,8 +1112,8 @@ function printLiveConsoleSummary(summaries: LiveTrialSummary[]) {
       Paradigm: s.paradigm,
       Size: s.docSize,
       "Succ Rate": s.successRate,
-      "XML Delta": `${s.xmlDeltaMean.toFixed(0)} [${s.xmlDeltaMin}–${s.xmlDeltaMax}]`,
-      Fidelity: `${s.fidelityMean.toFixed(1)}% [${s.fidelityMin}–${s.fidelityMax}]`,
+      "XML Delta": `${s.xmlDeltaMean.toFixed(0)} [${s.xmlDeltaMin}-${s.xmlDeltaMax}]`,
+      Fidelity: `${s.fidelityMean.toFixed(1)}% [${s.fidelityMin}-${s.fidelityMax}]`,
       "Xml Integrity": s.xmlIntegrityRate,
       Trips: s.roundTripsMean.toFixed(1),
       TurnsSucc: s.turnsToSuccessMean.toFixed(1),
@@ -1127,7 +1127,7 @@ function printLiveConsoleSummary(summaries: LiveTrialSummary[]) {
         isSafe,
         false,
       ),
-      "Tokens Out": `${Math.round(s.tokensOutMean)} [${Math.round(s.tokensOutMin)}–${Math.round(s.tokensOutMax)}]`,
+      "Tokens Out": `${Math.round(s.tokensOutMean)} [${Math.round(s.tokensOutMin)}-${Math.round(s.tokensOutMax)}]`,
       "Total Tokens": formatTokenMetric(
         s.totalTokensMean,
         s.totalTokensMin,
@@ -1139,7 +1139,7 @@ function printLiveConsoleSummary(summaries: LiveTrialSummary[]) {
         false,
       ),
       Cost: "UNKNOWN",
-      Latency: `${(s.latencyMeanMs / 1000).toFixed(1)}s [${(s.latencyMinMs / 1000).toFixed(1)}–${(s.latencyMaxMs / 1000).toFixed(1)}]`,
+      Latency: `${(s.latencyMeanMs / 1000).toFixed(1)}s [${(s.latencyMinMs / 1000).toFixed(1)}-${(s.latencyMaxMs / 1000).toFixed(1)}]`,
     };
   });
   console.table(tableRows);
@@ -1179,17 +1179,17 @@ function writeLiveResultsFiles(summaries: LiveTrialSummary[]) {
   for (const sId of scenariosGrouped) {
     const sResults = summaries.filter((s) => s.scenarioId === sId);
     md += `### Scenario: ${sResults[0]?.scenarioName} (\`${sId}\`)\n\n`;
-    md += `| Paradigm | Doc Size | Success Rate | XML Delta (Surgicality) | Fidelity Score (Avg [Min–Max]) | XML Integrity | Round Trips (Avg) | Turns to Success (Avg) | Recovery Rate (Avg) | Input Tokens (Avg [Min–Max]) | Output Tokens (Avg [Min–Max]) | Total Tokens (Avg [Min–Max]) | Cost (Avg [Min–Max]) | Latency (Avg [Min–Max]) |\n`;
+    md += `| Paradigm | Doc Size | Success Rate | XML Delta (Surgicality) | Fidelity Score (Avg [Min-Max]) | XML Integrity | Round Trips (Avg) | Turns to Success (Avg) | Recovery Rate (Avg) | Input Tokens (Avg [Min-Max]) | Output Tokens (Avg [Min-Max]) | Total Tokens (Avg [Min-Max]) | Cost (Avg [Min-Max]) | Latency (Avg [Min-Max]) |\n`;
     md += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
 
     for (const s of sResults) {
       const isSafe = s.paradigm === "safe-docx";
       md +=
-        `| **${s.paradigm}** | ${s.docSize} | ${s.successRate} | ${s.xmlDeltaMean.toFixed(0)} [${s.xmlDeltaMin}–${s.xmlDeltaMax}] | ${s.fidelityMean.toFixed(1)}% [${s.fidelityMin}–${s.fidelityMax}] | ${s.xmlIntegrityRate} | ${s.roundTripsMean.toFixed(1)} | ${s.turnsToSuccessMean.toFixed(1)} | ${(s.recoveryRateMean * 100).toFixed(1)}% | ` +
+        `| **${s.paradigm}** | ${s.docSize} | ${s.successRate} | ${s.xmlDeltaMean.toFixed(0)} [${s.xmlDeltaMin}-${s.xmlDeltaMax}] | ${s.fidelityMean.toFixed(1)}% [${s.fidelityMin}-${s.fidelityMax}] | ${s.xmlIntegrityRate} | ${s.roundTripsMean.toFixed(1)} | ${s.turnsToSuccessMean.toFixed(1)} | ${(s.recoveryRateMean * 100).toFixed(1)}% | ` +
         `${formatTokenMetric(s.tokensInMean, s.tokensInMin, s.tokensInMax, s.newContentTokensMean, s.newContentTokensMin, s.newContentTokensMax, isSafe, true)} | ` +
-        `${Math.round(s.tokensOutMean).toLocaleString()} [${Math.round(s.tokensOutMin).toLocaleString()}–${Math.round(s.tokensOutMax).toLocaleString()}] | ` +
+        `${Math.round(s.tokensOutMean).toLocaleString()} [${Math.round(s.tokensOutMin).toLocaleString()}-${Math.round(s.tokensOutMax).toLocaleString()}] | ` +
         `${formatTokenMetric(s.totalTokensMean, s.totalTokensMin, s.totalTokensMax, (s.newContentTokensMean || 0) + s.tokensOutMean, (s.newContentTokensMin || 0) + s.tokensOutMin, (s.newContentTokensMax || 0) + s.tokensOutMax, isSafe, true)} | ` +
-        `UNKNOWN | ${(s.latencyMeanMs / 1000).toFixed(1)}s [${(s.latencyMinMs / 1000).toFixed(1)}–${(s.latencyMaxMs / 1000).toFixed(1)}] |\n`;
+        `UNKNOWN | ${(s.latencyMeanMs / 1000).toFixed(1)}s [${(s.latencyMinMs / 1000).toFixed(1)}-${(s.latencyMaxMs / 1000).toFixed(1)}] |\n`;
     }
     md += `\n`;
   }
