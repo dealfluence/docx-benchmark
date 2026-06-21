@@ -306,7 +306,7 @@ export function bindArgsToTempPath(
   tempFilePath: string,
 ): Record<string, unknown> {
   const cleanArgs = { ...args };
-  for (const key of ["file_path", "path", "save_to_local_path"]) {
+  for (const key of ["file_path", "path", "save_to_local_path", "original_docx_path", "output_path"]) {
     if (key in properties) {
       cleanArgs[key] = tempFilePath;
     }
@@ -368,6 +368,7 @@ You must be highly efficient and minimize the number of tool calls and conversat
 Follow this precise strategy:
 1. Locate the content to change by calling 'grep' with a specific pattern. Do NOT read the entire document if not needed.
 2. Edit the document content using 'replace_text' or 'batch_edit' (if multiple edits are needed). Ensure your edits are precise. If multiple edits are required, perform them in batch or in a single turn if possible.
+   CRITICAL: If you use 'batch_edit', every object inside the 'steps' array MUST contain a unique, non-empty string 'step_id' (e.g. "step_1", "step_2").
 3. Save the document by calling 'save' immediately after editing.
 4. Stop calling tools once saved.
 
@@ -423,9 +424,18 @@ export async function runAdeuLoop(
 The document is currently located at path: "${tempFilePath}".
 Your task is: ${taskDescription}
 
-Please observe the document first by calling the 'read_document' tool, analyze the content, then perform edits by calling 'apply_patch' with transactional modifications.
+Please observe the document first by calling the 'read_docx' tool, analyze the content, then perform edits by calling 'process_document_batch' with transactional modifications.
 
-You MUST call 'read_document' a second time after applying a patch to verify that your changes were successfully applied and the correct text is present in the updated document.
+CRITICAL PARAMETER FORMAT RULES:
+1. The 'changes' parameter in 'process_document_batch' is a native JSON array of objects. Do NOT double-serialize or pass JSON string strings inside the array.
+   Correct format:
+   "changes": [
+     { "type": "modify", "target_text": "old text", "new_text": "new text" }
+   ]
+   Incorrect format:
+   "changes": [
+     "{\"type\": \"modify\", \"target_text\": \"old text\"}"
+   ]
 
 CRITICAL INSTRUCTIONS FOR STOPPING:
 1. Once you have verified that the text of your edits is present in the document, you MUST stop calling tools immediately. DO NOT call any more tools (do not call 'read_document' or 'apply_patch' again).
