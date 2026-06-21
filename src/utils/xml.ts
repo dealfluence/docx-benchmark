@@ -24,7 +24,7 @@ export function validateXmlSyntax(rawOutput: string): boolean {
 export function applyXmlSearchReplace(originalXml: string, responseText: string): string {
   const lines = responseText.split(/\r?\n/);
   const blocks: Array<{ search: string; replace: string }> = [];
-  
+
   let inSearch = false;
   let inReplace = false;
   let searchLines: string[] = [];

@@ -7,16 +7,43 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { DocumentObject, DocumentMapper, RedlineEngine } from "@adeu/core";
 import dotenv from "dotenv";
 
-import { getGoldenDocxPath, XML_SYSTEM_PROMPT, ADEU_SYSTEM_PROMPT } from "./baselines.js";
+import { getGoldenDocxPath } from "./utils/paths.js";
 import { scenarios } from "./scenarios.js";
-import { evaluateFidelity, createStrippedDoc, createXmlReconstructedDoc } from "./fidelity.js";
-import { checkScenarioSuccess } from "./success.js";
-
 import {
-  withTimeout,
-  AdeuOutputSchema,
-  GEMINI_TIMEOUT_MS,
-} from "./utils/gemini.js";
+  evaluateTrial,
+  createStrippedDoc,
+  createXmlReconstructedDoc,
+  TrialEvaluation,
+} from "./fidelity.js";
+
+export const XML_SYSTEM_PROMPT = `You are an expert contract editor. You are provided with the XML content of the main document part of a Microsoft Word file.
+Analyze the XML structure and perform the requested edit.
+
+To perform the edit, you can use either of these two formats:
+
+1. SEARCH/REPLACE BLOCK FORMAT (Highly Recommended for surgical edits):
+Output one or more search/replace blocks specifying exactly which lines of XML to modify. This preserves unmodified XML perfectly.
+Format:
+<<<<<<< SEARCH
+[Exact XML lines from the original document to find]
+=======
+[New XML lines to replace the search block]
+>>>>>>> REPLACE
+
+2. FULL XML FORMAT:
+If the change is extremely complex or touches almost every part, output the entire updated XML document.
+
+Ensure you maintain valid XML syntax, well-formed tags, and preserve existing namespaces and styles.`;
+
+export const ADEU_SYSTEM_PROMPT = `You are an expert contract editor. You are provided with the document in Markdown with track changes represented as CriticMarkup (e.g. {++insert++}, {--delete--}).
+Perform the requested edits and output a JSON array of DocumentChange objects representing only the surgical modifications or review actions to be applied.
+Supported operations:
+- { "type": "modify", "target_text": string, "new_text": string }
+- { "type": "accept", "target_id": string }
+- { "type": "reject", "target_id": string }
+- { "type": "reply", "target_id": string, "text": string }`;
+
+import { withTimeout, AdeuOutputSchema, GEMINI_TIMEOUT_MS } from "./utils/gemini.js";
 import { validateXmlSyntax, applyXmlSearchReplace, cleanJsonResponse } from "./utils/xml.js";
 import { runSafeDocxLoop, runAdeuLoop } from "./loops.js";
 import {
@@ -25,7 +52,7 @@ import {
   printLiveConsoleSummary,
   writeLiveResultsFiles,
   LiveTrialSummary,
-  SingleTrialRun
+  SingleTrialRun,
 } from "./reporting.js";
 
 // Load environment variables from .env
@@ -68,6 +95,80 @@ export {
 export { validateXmlSyntax, applyXmlSearchReplace, cleanJsonResponse } from "./utils/xml.js";
 export { runUnifiedAgenticLoop, runSafeDocxLoop, runAdeuLoop } from "./loops.js";
 export { printLiveConsoleSummary, writeLiveResultsFiles } from "./reporting.js";
+
+export interface OneShotResult {
+  tokensIn: number;
+  tokensOut: number;
+  finalDoc: DocumentObject | null;
+}
+
+export async function runOneShot(
+  paradigm: "raw-xml" | "markdown-roundtrip" | "adeu",
+  scenario: any,
+  buffer: Buffer,
+  client: GoogleGenerativeAI,
+  model: string,
+): Promise<OneShotResult> {
+  const doc = await DocumentObject.load(buffer);
+  const isRawXml = paradigm === "raw-xml";
+  const isMd = paradigm === "markdown-roundtrip";
+  const systemPrompt = isRawXml
+    ? XML_SYSTEM_PROMPT
+    : isMd
+      ? MD_LIVE_SYSTEM_PROMPT
+      : ADEU_SYSTEM_PROMPT;
+  const documentContent = isRawXml ? doc.part.blob : new DocumentMapper(doc, isMd).full_text;
+  const userInstruction =
+    isRawXml || isMd
+      ? `Please update the document text according to these instructions:\nTarget Text to find: "${scenario.targetText}"\nReplacement Text to insert: "${scenario.replacementText}"`
+      : `Generate a JSON array of DocumentChange objects representing the required change.\nTarget Text: "${scenario.targetText}"\nReplacement Text: "${scenario.replacementText}"\nReview Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) : "none"}`;
+
+  const fullUserMessage = `Here is the document context:\n=== DOCUMENT START ===\n${documentContent}\n=== DOCUMENT END ===\n\nTask:\n${userInstruction}`;
+
+  const modelInstance = client.getGenerativeModel(
+    {
+      model,
+      generationConfig: { temperature: 0.0 },
+    },
+    { timeout: GEMINI_TIMEOUT_MS },
+  );
+  const geminiResponse = await withTimeout(
+    modelInstance.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: `System Instructions:\n${systemPrompt}\n\n${fullUserMessage}` }],
+        },
+      ],
+    }),
+    GEMINI_TIMEOUT_MS,
+    `Gemini API call timed out after ${GEMINI_TIMEOUT_MS}ms`,
+  );
+  const rawOutput = geminiResponse.response.text() || "";
+  const tokensIn = geminiResponse.response.usageMetadata?.promptTokenCount || 0;
+  const tokensOut = geminiResponse.response.usageMetadata?.candidatesTokenCount || 0;
+
+  let finalDoc: DocumentObject | null = null;
+  if (paradigm === "raw-xml") {
+    const appliedXml = applyXmlSearchReplace(doc.part.blob, rawOutput);
+    if (validateXmlSyntax(appliedXml)) {
+      finalDoc = await createXmlReconstructedDoc(buffer, appliedXml);
+    }
+  } else if (paradigm === "markdown-roundtrip") {
+    finalDoc = await createStrippedDoc(buffer, rawOutput);
+  } else {
+    const cleanJson = cleanJsonResponse(rawOutput);
+    const validated = AdeuOutputSchema.safeParse(JSON.parse(cleanJson));
+    if (!validated.success) {
+      throw new Error(`JSON failed Adeu schema validation: ${validated.error.message}`);
+    }
+    const engine = new RedlineEngine(doc);
+    engine.process_batch(validated.data);
+    finalDoc = doc;
+  }
+
+  return { tokensIn, tokensOut, finalDoc };
+}
 
 export async function runLiveBenchmark() {
   const docPath = getGoldenDocxPath();
@@ -132,13 +233,12 @@ export async function runLiveBenchmark() {
           for (let rep = 0; rep < reps; rep++) {
             process.stdout.write(`  Rep ${rep + 1}/${reps}... `);
 
-            const doc = await DocumentObject.load(buffer);
             const originalDoc = await DocumentObject.load(buffer);
 
             const start = performance.now();
             let tokensIn = 0;
             let tokensOut = 0;
-            let xmlIntegrity: any = "FAIL";
+            let xmlIntegrity: TrialEvaluation["xmlIntegrity"] = "FAIL";
             let fidelity = 0;
             let xmlDelta = 0;
             let success = false;
@@ -150,6 +250,7 @@ export async function runLiveBenchmark() {
             let historyTokensVal = 0;
             let newContentTokensVal = 0;
 
+            let finalDoc: DocumentObject | null = null;
             try {
               if (paradigm === "safe-docx") {
                 const fullTaskDescription = getFullTaskDescription(scenario);
@@ -171,11 +272,7 @@ export async function runLiveBenchmark() {
                 newContentTokensVal = loopRes.newContentTokens || 0;
 
                 if (loopRes.finalBuffer) {
-                  const finalDoc = await DocumentObject.load(loopRes.finalBuffer);
-                  xmlIntegrity = "PASS";
-                  const fidReport = evaluateFidelity(originalDoc, finalDoc, scenario.id);
-                  fidelity = fidReport.score;
-                  xmlDelta = fidReport.xmlDelta;
+                  finalDoc = await DocumentObject.load(loopRes.finalBuffer);
                 }
               } else if (paradigm === "adeu" && scenario.isAgentic) {
                 const fullTaskDescription = getFullTaskDescription(scenario);
@@ -197,84 +294,30 @@ export async function runLiveBenchmark() {
                 newContentTokensVal = loopRes.newContentTokens || 0;
 
                 if (loopRes.finalBuffer) {
-                  const finalDoc = await DocumentObject.load(loopRes.finalBuffer);
-                  xmlIntegrity = "PASS";
-                  fidelity = evaluateFidelity(originalDoc, finalDoc, scenario.id).score;
+                  finalDoc = await DocumentObject.load(loopRes.finalBuffer);
                 }
               } else {
-                const isRawXml = paradigm === "raw-xml";
-                const isMd = paradigm === "markdown-roundtrip";
-                const systemPrompt = isRawXml
-                  ? XML_SYSTEM_PROMPT
-                  : isMd
-                    ? MD_LIVE_SYSTEM_PROMPT
-                    : ADEU_SYSTEM_PROMPT;
-                const documentContent = isRawXml
-                  ? doc.part.blob
-                  : new DocumentMapper(doc, isMd).full_text;
-                const userInstruction =
-                  isRawXml || isMd
-                    ? `Please update the document text according to these instructions:\nTarget Text to find: "${scenario.targetText}"\nReplacement Text to insert: "${scenario.replacementText}"`
-                    : `Generate a JSON array of DocumentChange objects representing the required change.\nTarget Text: "${scenario.targetText}"\nReplacement Text: "${scenario.replacementText}"\nReview Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) : "none"}`;
-
-                const fullUserMessage = `Here is the document context:\n=== DOCUMENT START ===\n${documentContent}\n=== DOCUMENT END ===\n\nTask:\n${userInstruction}`;
-
-                const modelInstance = (client as GoogleGenerativeAI).getGenerativeModel(
-                  {
-                    model,
-                    generationConfig: { temperature: 0.0 },
-                  },
-                  { timeout: GEMINI_TIMEOUT_MS },
+                const res = await runOneShot(
+                  paradigm as "raw-xml" | "markdown-roundtrip" | "adeu",
+                  scenario,
+                  buffer,
+                  client as GoogleGenerativeAI,
+                  model,
                 );
-                const geminiResponse = await withTimeout(
-                  modelInstance.generateContent({
-                    contents: [
-                      {
-                        role: "user",
-                        parts: [
-                          { text: `System Instructions:\n${systemPrompt}\n\n${fullUserMessage}` },
-                        ],
-                      },
-                    ],
-                  }),
-                  GEMINI_TIMEOUT_MS,
-                  `Gemini API call timed out after ${GEMINI_TIMEOUT_MS}ms`,
-                );
-                const rawOutput = geminiResponse.response.text() || "";
-                tokensIn = geminiResponse.response.usageMetadata?.promptTokenCount || 0;
-                tokensOut = geminiResponse.response.usageMetadata?.candidatesTokenCount || 0;
+                tokensIn = res.tokensIn;
+                tokensOut = res.tokensOut;
                 roundTrips = 1;
+                finalDoc = res.finalDoc;
+              }
 
-                let modifiedDoc: DocumentObject | null = null;
-                if (paradigm === "raw-xml") {
-                  const appliedXml = applyXmlSearchReplace(doc.part.blob, rawOutput);
-                  if (validateXmlSyntax(appliedXml)) {
-                    modifiedDoc = await createXmlReconstructedDoc(buffer, appliedXml);
-                  }
-                } else if (paradigm === "markdown-roundtrip") {
-                  modifiedDoc = await createStrippedDoc(buffer, rawOutput);
-                } else {
-                  const cleanJson = cleanJsonResponse(rawOutput);
-                  const validated = AdeuOutputSchema.safeParse(JSON.parse(cleanJson));
-                  if (!validated.success) {
-                    throw new Error(
-                      `JSON failed Adeu schema validation: ${validated.error.message}`,
-                    );
-                  }
-                  const engine = new RedlineEngine(doc);
-                  engine.process_batch(validated.data);
-                  modifiedDoc = doc;
-                }
-
-                if (modifiedDoc) {
-                  const exported = await modifiedDoc.save();
-                  if (exported && exported.length > 0) {
-                    xmlIntegrity = "PASS";
-                    const fidReport = evaluateFidelity(originalDoc, modifiedDoc, scenario.id);
-                    fidelity = fidReport.score;
-                    xmlDelta = fidReport.xmlDelta || 0;
-                    success = checkScenarioSuccess(scenario.id, originalDoc, modifiedDoc);
-                  }
+              if (finalDoc) {
+                const exported = await finalDoc.save();
+                if (exported && exported.length > 0) {
+                  const evalResult = evaluateTrial(originalDoc, finalDoc, scenario.id);
+                  success = evalResult.success;
+                  fidelity = evalResult.fidelity;
+                  xmlDelta = evalResult.xmlDelta;
+                  xmlIntegrity = evalResult.xmlIntegrity;
                 }
               }
             } catch (e: unknown) {

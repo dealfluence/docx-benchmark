@@ -70,10 +70,10 @@ export function checkScenarioSuccess(
       const hasSection22 = text.includes("2.2 feedback");
       const hasSection23 = text.includes("2.3 customer data");
       const hasSection24 = text.includes("2.4 data usage rights");
-      
+
       // Check that the reference "Notwithstanding Section 2.2" in Data Usage Rights was updated to 2.3
       const hasUpdatedRef = text.includes("notwithstanding section 2.3");
-      
+
       return hasFeedback && hasSection22 && hasSection23 && hasSection24 && hasUpdatedRef;
     }
 

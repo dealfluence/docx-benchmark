@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
-    "benchmark:live": "npm run build && node dist/live.js"
+    "benchmark": "tsc && node dist/live.js",
+    "benchmark:quick": "tsc && node dist/live.js --quick"
   },
   "keywords": [],
   "author": "",

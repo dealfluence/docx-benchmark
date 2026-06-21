@@ -27,8 +27,10 @@ export const scenarios: Scenario[] = [
     name: "Clause Drafting (Section Insertion)",
     description:
       "Inserting a structured data protection clause at the end of the General Provisions section. Measures formatting inheritance and layout consistency.",
-    targetText: "8.3 Entire Agreement.\n\nThis Agreement is the entire agreement between Provider and Customer regarding Customer’s use of Services and supersedes all prior and contemporaneous agreements, proposals or representations, written or oral, concerning its subject matter.",
-    replacementText: "8.3 Entire Agreement.\n\nThis Agreement is the entire agreement between Provider and Customer regarding Customer’s use of Services and supersedes all prior and contemporaneous agreements, proposals or representations, written or oral, concerning its subject matter.\n\n8.4 Data Protection.\n\nEach party shall comply with all applicable data protection laws.",
+    targetText:
+      "8.3 Entire Agreement.\n\nThis Agreement is the entire agreement between Provider and Customer regarding Customer’s use of Services and supersedes all prior and contemporaneous agreements, proposals or representations, written or oral, concerning its subject matter.",
+    replacementText:
+      "8.3 Entire Agreement.\n\nThis Agreement is the entire agreement between Provider and Customer regarding Customer’s use of Services and supersedes all prior and contemporaneous agreements, proposals or representations, written or oral, concerning its subject matter.\n\n8.4 Data Protection.\n\nEach party shall comply with all applicable data protection laws.",
   },
   {
     id: "negotiation-cleanup",
@@ -47,8 +49,10 @@ export const scenarios: Scenario[] = [
     name: "Bulk Rewrite (Clause/Section Replacement)",
     description:
       "Replacing an entire clause with a rewritten standard. Evaluates cost advantages of surgical patching vs full re-emission when block changes are larger.",
-    targetText: "If any invoiced amount is not received by Provider by the due date, then without limiting Provider’s rights or remedies, those charges may accrue late interest at the rate of 1.5% of the outstanding balance per month, or the maximum rate permitted by law, whichever is lower.",
-    replacementText: "Late payments shall accrue interest at the rate of 1.0% per month on any outstanding balance.",
+    targetText:
+      "If any invoiced amount is not received by Provider by the due date, then without limiting Provider’s rights or remedies, those charges may accrue late interest at the rate of 1.5% of the outstanding balance per month, or the maximum rate permitted by law, whichever is lower.",
+    replacementText:
+      "Late payments shall accrue interest at the rate of 1.0% per month on any outstanding balance.",
   },
   {
     id: "whole-document-restyle",

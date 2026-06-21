@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import { DocumentObject } from "@adeu/core";
-import { getGoldenDocxPath } from "../baselines.js";
+import { getGoldenDocxPath } from "../utils/paths.js";
 import { getPartContent, extractStyleIds, hasHeaderOrFooter } from "../fidelity.js";
 
 async function inspectGolden() {

@@ -1,5 +1,6 @@
 import { DocumentObject } from "@adeu/core";
 import { DOMParser } from "@xmldom/xmldom";
+import { checkScenarioSuccess } from "./success.js";
 
 export interface FidelityReport {
   stylesPreserved: boolean;
@@ -8,6 +9,47 @@ export interface FidelityReport {
   trackChangesPreserved: boolean;
   score: number;
   xmlDelta: number;
+}
+
+export interface TrialEvaluation {
+  success: boolean;
+  fidelity: number;
+  xmlDelta: number;
+  xmlIntegrity: "PASS" | "FAIL";
+}
+
+/**
+ * Standardized trial evaluation checking well-formed XML syntax, scenario success, and style fidelity.
+ */
+export function evaluateTrial(
+  originalDoc: DocumentObject,
+  finalDoc: DocumentObject,
+  scenarioId: string,
+): TrialEvaluation {
+  let xmlIntegrity: "PASS" | "FAIL" = "FAIL";
+  try {
+    const parser = new DOMParser({
+      onError: () => {
+        throw new Error("XML Parse Error");
+      },
+    });
+    const xmlDoc = parser.parseFromString(finalDoc.part.blob, "text/xml");
+    if (xmlDoc && xmlDoc.getElementsByTagName("parsererror").length === 0) {
+      xmlIntegrity = "PASS";
+    }
+  } catch {
+    xmlIntegrity = "FAIL";
+  }
+
+  const success = checkScenarioSuccess(scenarioId, originalDoc, finalDoc);
+  const fidReport = evaluateFidelity(originalDoc, finalDoc, scenarioId);
+
+  return {
+    success,
+    fidelity: xmlIntegrity === "PASS" ? fidReport.score : 0,
+    xmlDelta: fidReport.xmlDelta,
+    xmlIntegrity,
+  };
 }
 
 /**

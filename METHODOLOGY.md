@@ -112,6 +112,39 @@ Tokens are counted exactly as returned by the API providers.
 *   For **Gemini**, we use the `usageMetadata` prompt and candidates token counts (`promptTokenCount`, `candidatesTokenCount`) from the API response.
 *   For the offline estimate, we use the `js-tiktoken` package with `o200k_base` encoding as a consistent model-free proxy to measure input sizes.
 
+### 4.1 Estimated Token Breakdown Splits
+Because multi-turn conversation loops incur substantial overhead by re-transmitting tool schemas and context history, the benchmark splits the total input token count ($T_{in}$) into three components:
+1. **Schema Tokens (`schemaTokens`)**: The portion of input tokens consumed by registering and transferring tool declarations. This is measured by comparing the model's token count with and without the tool schemas registered.
+2. **History Tokens (`historyTokens`)**: The portion of input tokens used to re-transmit the accumulated conversation messages and tool responses from previous turns.
+3. **New Content Tokens (`newContentTokens`)**: The estimated core payload of the current turn, calculated by subtracting the schema and history tokens from the total prompt token count.
+
+These splits are computed turn-by-turn as follows:
+* $S_{turn} = \min(\text{schemaTokensPerTurn}, \text{promptTokensThisTurn})$
+* $H_{turn} = \min(\text{historyAccumulated}, \text{promptTokensThisTurn} - S_{turn})$
+* $N_{turn} = \text{promptTokensThisTurn} - S_{turn} - H_{turn}$
+
+This division provides an honest metric separating conversation architecture overhead from active document processing.
+
+---
+
+## 5. Execution Loops, Schemas, and Logging
+
+To ensure a rigorous and balanced comparison between all four paradigms, the agentic execution loops adhere to strict standardization principles:
+
+### 5.1 Unified Conversational Turn Limits
+Both agentic loop implementations (`safe-docx` and `adeu` loops) are restricted to an identical maximum turn cap of **`MAX_TURNS = 10`**. Turn limits are applied symmetrically to eliminate runtime biases.
+
+### 5.2 Single-Path Schema Normalization
+Tool definitions originating from third-party MCP servers undergo standard dynamic schema normalization in `cleanSchema` before being registered with Google Gemini. This translation process enforces:
+* **Uppercase Enum Translation**: Schema types are cast to uppercase strings (e.g., `SchemaType.OBJECT`).
+* **Complex Union Flattening**: Sub-schemas defined via `anyOf` or `oneOf` unions are dynamically compiled and flattened into discrete, single-type properties compatible with the Gemini parameters parser.
+* **Fallback Arrays**: Default item specifications are supplied for array configurations that lack them.
+
+### 5.3 Structured JSON Execution Logs
+Multi-turn agentic steps are reported in a structured, single-line JSON format:
+`{"turn": 1, "paradigm": "Safe Docx Loop", "tool": "grep", "args": {"pattern": "NordicTech"}, "ok": true, "resultBytes": 320, "elapsedMs": 412}`
+This guarantees uniform logging across loops, enabling clean parsing of intermediate executions without polluting stdout. Extended tool call payloads and responses are gated behind the `--verbose` flag.
+
 ---
 
 ## 6. Threats to Validity

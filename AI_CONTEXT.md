@@ -15,9 +15,9 @@ The benchmark measures and compares four document-editing paradigms on equal ter
 
 ---
 
-## 2. Key Metrics & Deterministic Evaluation
+## 2. Key Metrics & Unified Deterministic Evaluation
 
-All evaluation metrics are calculated dynamically at runtime; hardcoded metric assignments are forbidden.
+All evaluation metrics are calculated dynamically at runtime using the unified `evaluateTrial(originalDoc, finalDoc, scenarioId)` pipeline. All trials across all four paradigms are evaluated under identical conditions to ensure consistency. Hardcoded or simulated metric assignments are forbidden.
 
 ### 2.1 Formatting Fidelity Score (`fidelity`)
 Measures structural and style preservation on a `0%` to `100%` scale. Evaluates five dimensions:
@@ -33,6 +33,11 @@ Measures exact character changes to the XML structure rather than relying on LLM
 2.  **Longest Common Subsequence (LCS)**: Computes the LCS of tokens via dynamic programming (guarded with a linear fallback for arrays $> 4000$ elements to protect memory).
 3.  **Aggregation**: Sums the character lengths of added and deleted XML segments.
 
+### 2.3 Surgicality vs. Virtual DOM Normalization
+While both `safe-docx` and `adeu` preserve identical visual fidelity (100% score), their structural impact on raw XML differs:
+*   **Surgical Node Replacements**: Localized text-replacement actions (e.g. `safe-docx` block-level replacements) mutate very few XML characters (low `xmlDelta`).
+*   **Virtual DOM Serialization**: Models modifying the complete virtual DOM hierarchy (e.g. `adeu`) can incur higher `xmlDelta` values due to element/attribute ordering normalization, even when the visual output remains identical.
+
 ---
 
 ## 3. Schema & Integration Constraints
@@ -41,7 +46,7 @@ Measures exact character changes to the XML structure rather than relying on LLM
 Google Gemini has strict rules regarding the parameters schema of its registered tools:
 *   **Uppercase Enums**: Schema types must match uppercase strings (e.g. `SchemaType.OBJECT` = `"OBJECT"`, `SchemaType.ARRAY` = `"ARRAY"`). Providing lowercase `"object"` or `"array"` triggers immediate serialization or API validation failures.
 *   **Flattening Unions**: Gemini does not natively support complex JSON schema unions (`anyOf` or `oneOf` blocks) inside tool definitions.
-*   **Handling of `cleanSchema`**: Tool schemas extracted from third-party MCP servers (like `@adeu/mcp-server`) must have their `anyOf`/`oneOf` array structures dynamically flattened into flat `object` properties. When mapping types to `SchemaType` enums, the mapping logic must inspect the *resolved/flattened* property type rather than the original input type, which may be `undefined`.
+*   **Dynamic Cleanup (`cleanSchema`)**: Tool schemas extracted from third-party MCP servers are dynamically transformed into flat, single-type property schemas without relying on hardcoded pattern-matching or fossil schema definitions.
 
 ### 3.2 Token Breakdown and Loop Overhead
 To make an honest architectural comparison with multi-turn loops, `safe-docx` token metrics are broken down per turn into:
@@ -49,3 +54,14 @@ To make an honest architectural comparison with multi-turn loops, `safe-docx` to
 *   `historyTokens`: Portion used to re-transmit conversation history.
 *   `newContentTokens`: Real document-handling output and execution content.
 Both **Total Tokens** and the **`newContentTokens` floor** are reported to distinguish platform overhead from core document handling.
+
+### 3.3 Unified Loop Turn Limit
+Both the `safe-docx` and `adeu` agentic loops are governed by a unified execution ceiling of `MAX_TURNS = 10` conversational turns to eliminate execution biases.
+
+### 3.4 Tool Call Observability
+Multi-turn agent executions must report intermediate steps as single-line structured JSON objects rather than scattered stdout logs. This guarantees clean diagnostic paths for automated performance parsers.
+
+### 3.5 Double-Serialization Boundary Failures
+When designing tool schemas with complex nesting (such as arrays of object unions):
+*   **Schema Enforcement**: APIs must strictly enforce leaf-level properties when possible, as LLMs frequently fallback to stringifying JSON within arrays (double-serialization).
+*   **Defensive Parsing**: Downstream MCP tools or executors should implement defensive parsing to gracefully handle stringified JSON array parameters and prevent immediate runtime failures.

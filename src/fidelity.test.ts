@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import { describe, it, expect } from "vitest";
 import { DocumentObject } from "@adeu/core";
-import { getGoldenDocxPath } from "./baselines.js";
+import { getGoldenDocxPath } from "./utils/paths.js";
 import {
   evaluateFidelity,
   getPartContent,

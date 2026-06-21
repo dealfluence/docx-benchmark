@@ -62,7 +62,9 @@ export function getStats(arr: number[]): Stats {
   };
 }
 
-export function getFullTaskDescription(scenario: Partial<Scenario> & { description: string }): string {
+export function getFullTaskDescription(
+  scenario: Partial<Scenario> & { description: string },
+): string {
   let desc = scenario.description;
   if (scenario.targetText || scenario.replacementText || scenario.reviewAction) {
     desc += `\nInstructions:\n`;
@@ -94,11 +96,13 @@ export function printLiveConsoleSummary(summaries: LiveTrialSummary[], reps: num
   console.log(`\n\x1b[1m\x1b[32m=== LIVE BENCHMARK CONSOLE SUMMARY (N=${reps}) ===\x1b[0m`);
   const tableRows = summaries.map((s) => {
     const isSafe = s.paradigm === "safe-docx";
-    const totalFloorStats: Stats | undefined = s.newContentTokens ? {
-      mean: s.newContentTokens.mean + s.tokensOut.mean,
-      min: s.newContentTokens.min + s.tokensOut.min,
-      max: s.newContentTokens.max + s.tokensOut.max,
-    } : undefined;
+    const totalFloorStats: Stats | undefined = s.newContentTokens
+      ? {
+          mean: s.newContentTokens.mean + s.tokensOut.mean,
+          min: s.newContentTokens.min + s.tokensOut.min,
+          max: s.newContentTokens.max + s.tokensOut.max,
+        }
+      : undefined;
 
     return {
       Provider: s.provider,
@@ -111,19 +115,9 @@ export function printLiveConsoleSummary(summaries: LiveTrialSummary[], reps: num
       "Xml Integrity": s.xmlIntegrityRate,
       Trips: `${s.roundTrips.mean.toFixed(1)} [${s.roundTrips.min}-${s.roundTrips.max}]`,
       TurnsSucc: `${s.turnsToSuccess.mean.toFixed(1)} [${s.turnsToSuccess.min}-${s.turnsToSuccess.max}]`,
-      "Tokens In": formatTokenMetric(
-        s.tokensIn,
-        s.newContentTokens,
-        isSafe,
-        false,
-      ),
+      "Tokens In": formatTokenMetric(s.tokensIn, s.newContentTokens, isSafe, false),
       "Tokens Out": `${Math.round(s.tokensOut.mean)} [${Math.round(s.tokensOut.min)}-${Math.round(s.tokensOut.max)}]`,
-      "Total Tokens": formatTokenMetric(
-        s.totalTokens,
-        totalFloorStats,
-        isSafe,
-        false,
-      ),
+      "Total Tokens": formatTokenMetric(s.totalTokens, totalFloorStats, isSafe, false),
       Latency: `${(s.latency.mean / 1000).toFixed(1)}s [${(s.latency.min / 1000).toFixed(1)}-${(s.latency.max / 1000).toFixed(1)}]`,
     };
   });
@@ -169,11 +163,13 @@ export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: numbe
 
     for (const s of sResults) {
       const isSafe = s.paradigm === "safe-docx";
-      const totalFloorStats: Stats | undefined = s.newContentTokens ? {
-        mean: s.newContentTokens.mean + s.tokensOut.mean,
-        min: s.newContentTokens.min + s.tokensOut.min,
-        max: s.newContentTokens.max + s.tokensOut.max,
-      } : undefined;
+      const totalFloorStats: Stats | undefined = s.newContentTokens
+        ? {
+            mean: s.newContentTokens.mean + s.tokensOut.mean,
+            min: s.newContentTokens.min + s.tokensOut.min,
+            max: s.newContentTokens.max + s.tokensOut.max,
+          }
+        : undefined;
 
       md +=
         `| **${s.paradigm}** | ${s.docSize} | ${s.successRate} | ${s.xmlDelta.mean.toFixed(0)} [${s.xmlDelta.min}-${s.xmlDelta.max}] | ${s.fidelity.mean.toFixed(1)}% [${s.fidelity.min}-${s.fidelity.max}] | ${s.xmlIntegrityRate} | ${s.roundTrips.mean.toFixed(1)} [${s.roundTrips.min}-${s.roundTrips.max}] | ${s.turnsToSuccess.mean.toFixed(1)} [${s.turnsToSuccess.min}-${s.turnsToSuccess.max}] | ${(s.recoveryRate.mean * 100).toFixed(1)}% [${(s.recoveryRate.min * 100).toFixed(1)}%-${(s.recoveryRate.max * 100).toFixed(1)}%] | ` +

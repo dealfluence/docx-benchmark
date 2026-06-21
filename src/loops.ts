@@ -45,6 +45,8 @@ export interface UnifiedLoopConfig {
   loopName?: string;
 }
 
+export const MAX_TURNS = 10;
+
 export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<LoopResult> {
   const {
     gemini,
@@ -110,9 +112,12 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
   try {
     for (let turn = 1; turn <= maxTurns; turn++) {
       const prefix = loopName ? `[${loopName} Turn ${turn}]` : `[Loop Turn ${turn}]`;
-      console.log(
-        `\x1b[36m${prefix}\x1b[0m Sending prompt content length: ${contents.length} messages.`,
-      );
+      const isVerbose = process.argv.includes("--verbose");
+      if (isVerbose) {
+        console.log(
+          `\x1b[36m${prefix}\x1b[0m Sending prompt content length: ${contents.length} messages.`,
+        );
+      }
 
       const geminiResponse = await withTimeout(
         modelInstance.generateContent({ contents }),
@@ -139,18 +144,16 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
       const parts = geminiResponse.response.candidates?.[0]?.content?.parts || [];
       const functionCalls = geminiResponse.response.functionCalls() || [];
 
-      console.log(
-        `\x1b[36m${prefix}\x1b[0m Model generated ${parts.length} parts and ${functionCalls.length} function calls.`,
-      );
-      for (const fc of functionCalls) {
+      if (isVerbose) {
         console.log(
-          `\x1b[36m${prefix}\x1b[0m Tool Call Request: \x1b[33m${fc.name}\x1b[0m with args:`,
-          JSON.stringify(fc.args),
+          `\x1b[36m${prefix}\x1b[0m Model generated ${parts.length} parts and ${functionCalls.length} function calls.`,
         );
       }
 
       if (functionCalls.length === 0) {
-        console.log(`\x1b[36m${prefix}\x1b[0m No function calls generated. Breaking loop.`);
+        if (isVerbose) {
+          console.log(`\x1b[36m${prefix}\x1b[0m No function calls generated. Breaking loop.`);
+        }
         break;
       }
 
@@ -159,6 +162,7 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
 
       const functionResponses: Array<{ name: string; response: Record<string, unknown> }> = [];
       let currentTurnHadError = false;
+      const turnStart = performance.now();
 
       for (const fc of functionCalls) {
         try {
@@ -179,6 +183,21 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
             response: { error: errMsg },
           });
         }
+
+        const elapsedMs = Math.round(performance.now() - turnStart);
+        const resObj = functionResponses[functionResponses.length - 1]?.response;
+        const resStr = JSON.stringify(resObj);
+        console.log(
+          JSON.stringify({
+            turn,
+            paradigm: loopName,
+            tool: fc.name,
+            args: fc.args,
+            ok: !currentTurnHadError,
+            resultBytes: resStr ? resStr.length : 0,
+            elapsedMs,
+          }),
+        );
       }
 
       contents.push({
@@ -288,6 +307,30 @@ export function isMcpToolSuccess(toolResult: McpToolResult): boolean {
   return !(textContent.includes('"success": false') || textContent.includes('"error"'));
 }
 
+export function makeMcpToolExecutor(
+  mcpClient: Client,
+  mcpTools: McpTool[],
+  tempFilePath: string,
+  options: { forceSaveOverwrite?: boolean; clientName: string },
+) {
+  return async (name: string, args: Record<string, unknown>) => {
+    const toolDef = mcpTools.find((t) => t.name === name);
+    const cleanArgs = bindArgsToTempPath(
+      args,
+      (toolDef?.inputSchema?.properties as Record<string, unknown>) || {},
+      tempFilePath,
+    );
+    if (options.forceSaveOverwrite && name === "save") {
+      cleanArgs.allow_overwrite = true;
+    }
+    const toolResult = await mcpClient.callTool({ name, arguments: cleanArgs });
+    return {
+      result: { result: (toolResult as McpToolResult).content },
+      hadError: !isMcpToolSuccess(toolResult as McpToolResult),
+    };
+  };
+}
+
 export async function runSafeDocxLoop(
   gemini: GoogleGenerativeAI,
   modelName: string,
@@ -295,7 +338,6 @@ export async function runSafeDocxLoop(
   scenarioId: string,
   taskDescription: string,
 ): Promise<LoopResult> {
-  const MAX_TURNS = 8;
   const tempFilePath = path.resolve(`./temp_safe_docx_rep_${performance.now()}.docx`);
   fs.copyFileSync(docPath, tempFilePath);
 
@@ -327,35 +369,10 @@ Do not re-read the entire document after editing unless strictly necessary. Do n
     maxTurns: MAX_TURNS,
     tools: geminiTools,
     loopName: "Safe Docx Loop",
-    executeTool: async (name, args) => {
-      const toolDef = mcpTools.find((t) => t.name === name);
-      const cleanArgs = bindArgsToTempPath(
-        args,
-        (toolDef?.inputSchema?.properties as Record<string, unknown>) || {},
-        tempFilePath,
-      );
-      if (name === "save") {
-        cleanArgs.allow_overwrite = true;
-      }
-
-      const toolResult = await withTimeout(
-        mcpClient.callTool({
-          name,
-          arguments: cleanArgs,
-        }),
-        MCP_TOOL_TIMEOUT_MS,
-        `MCP tool call '${name}' timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
-      );
-
-      console.log(
-        `[MCP TOOL CALL] Name: ${name}, Arguments: ${JSON.stringify(cleanArgs)}, Result: ${JSON.stringify(toolResult)}`,
-      );
-
-      return {
-        result: { result: (toolResult as McpToolResult).content },
-        hadError: !isMcpToolSuccess(toolResult as McpToolResult),
-      };
-    },
+    executeTool: makeMcpToolExecutor(mcpClient, mcpTools, tempFilePath, {
+      forceSaveOverwrite: true,
+      clientName: "Safe-Docx",
+    }),
     checkSuccess: async () => {
       const currentBuffer = fs.readFileSync(tempFilePath);
       const currentDoc = await DocumentObject.load(currentBuffer);
@@ -380,7 +397,6 @@ export async function runAdeuLoop(
   scenarioId: string,
   taskDescription: string,
 ): Promise<LoopResult> {
-  const MAX_TURNS = 15;
   const tempFilePath = path.resolve(`./temp_adeu_rep_${performance.now()}.docx`);
   fs.writeFileSync(tempFilePath, docBuffer);
 
@@ -413,32 +429,10 @@ CRITICAL INSTRUCTIONS FOR STOPPING:
     maxTurns: MAX_TURNS,
     tools: geminiTools,
     loopName: "Adeu Loop",
-    executeTool: async (name, args) => {
-      const toolDef = mcpTools.find((t) => t.name === name);
-      const cleanArgs = bindArgsToTempPath(
-        args,
-        (toolDef?.inputSchema?.properties as Record<string, unknown>) || {},
-        tempFilePath,
-      );
-
-      const toolResult = await withTimeout(
-        mcpClient.callTool({
-          name,
-          arguments: cleanArgs,
-        }),
-        MCP_TOOL_TIMEOUT_MS,
-        `Adeu MCP tool call '${name}' timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
-      );
-
-      console.log(
-        `[Adeu MCP TOOL CALL] Name: ${name}, Arguments: ${JSON.stringify(cleanArgs)}, Result: ${JSON.stringify(toolResult)}`,
-      );
-
-      return {
-        result: { result: (toolResult as McpToolResult).content },
-        hadError: !isMcpToolSuccess(toolResult as McpToolResult),
-      };
-    },
+    executeTool: makeMcpToolExecutor(mcpClient, mcpTools, tempFilePath, {
+      forceSaveOverwrite: false,
+      clientName: "Adeu-MCP",
+    }),
     checkSuccess: async () => {
       const currentBuffer = fs.readFileSync(tempFilePath);
       const currentDoc = await DocumentObject.load(currentBuffer);

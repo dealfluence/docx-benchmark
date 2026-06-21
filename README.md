@@ -49,15 +49,11 @@ Open `.env` and fill in your API key for Google Gemini (`GEMINI_API_KEY`).
 To execute the live benchmarking suite and run active document redlining scenarios against the configured LLMs:
 
 ```bash
-# Run the live API benchmark suite
-npm run benchmark:live
-```
+# Run the full live API benchmark suite
+npm run benchmark
 
-You can configure the number of repetitions per trial using the `--reps <N>` option (default is `3`):
-
-```bash
-# Run with 1 rep for a quick smoke test
-npm run benchmark:live -- --reps 1
+# Run the quick live benchmark (1 rep, subset of scenarios)
+npm run benchmark:quick
 ```
 
 The live benchmark will compile the codebase, detect active keys in the environment, make actual API calls to run each paradigm and scenario, verify success, assess fidelity, and write reports to `results/<ISO>.json` and `results/<ISO>.md`.

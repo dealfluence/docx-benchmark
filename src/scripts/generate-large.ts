@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { DocumentObject } from "@adeu/core";
 import { DOMParser, XMLSerializer, Node } from "@xmldom/xmldom";
-import { getGoldenDocxPath } from "../baselines.js";
+import { getGoldenDocxPath } from "../utils/paths.js";
 
 async function main() {
   const docPath = getGoldenDocxPath();
@@ -11,7 +11,7 @@ async function main() {
 
   const parser = new DOMParser();
   const serializer = new XMLSerializer();
-  
+
   const docXml = doc.part.blob;
   const xmlDoc = parser.parseFromString(docXml, "text/xml");
   const body = xmlDoc.getElementsByTagName("w:body")[0];
@@ -20,7 +20,7 @@ async function main() {
   // Get all paragraphs/tables in the body except the final section properties
   const nodes: Node[] = [];
   let sectPr: Node | null = null;
-  
+
   for (let i = 0; i < body.childNodes.length; i++) {
     const node = body.childNodes[i];
     if (node.nodeName === "w:sectPr") {
@@ -36,9 +36,13 @@ async function main() {
     for (const node of nodes) {
       const cloned = node.cloneNode(true);
       const clonedStr = serializer.serializeToString(cloned);
-      
+
       // Clean up tracked changes or comments inside cloned nodes to avoid structural duplications
-      if (clonedStr.includes("w:ins") || clonedStr.includes("w:del") || clonedStr.includes("w:comment")) {
+      if (
+        clonedStr.includes("w:ins") ||
+        clonedStr.includes("w:del") ||
+        clonedStr.includes("w:comment")
+      ) {
         const cleanXml = clonedStr
           .replace(/<w:ins[^>]*>/g, "")
           .replace(/<\/w:ins>/g, "")
@@ -46,7 +50,7 @@ async function main() {
           .replace(/<w:commentRangeStart[^>]*\/>/g, "")
           .replace(/<w:commentRangeEnd[^>]*\/>/g, "")
           .replace(/<w:commentReference[^>]*\/>/g, "");
-        
+
         try {
           const cleanedNode = parser.parseFromString(cleanXml, "text/xml").documentElement;
           if (cleanedNode) body.appendChild(cleanedNode);
