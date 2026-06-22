@@ -176,8 +176,12 @@ describe("F6 Guard Test: Success Discriminates", () => {
       buffer,
       `Checklist review results: { "someKey": "value" }`,
     );
-    expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, passPolicy)).toBe(true);
-    expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, failPolicy)).toBe(false);
+    expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, passPolicy)).toBe(
+      true,
+    );
+    expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, failPolicy)).toBe(
+      false,
+    );
 
     // 4. playbook-commenting
     const passComment = await createStrippedDoc(buffer, "Plain text document content");
@@ -192,19 +196,29 @@ describe("F6 Guard Test: Success Discriminates", () => {
     // 5. multi-file-assembly
     const tempFilePath = "./temp_test_live_scenario5.docx";
     const tempDpaPath = "./temp_test_live_scenario5_dpa.docx";
-    
+
     // Create temporary DPA mock file
-    const dpaDoc = await createStrippedDoc(buffer, "Wayne Enterprises and June 22, 2026 dpa details");
+    const dpaDoc = await createStrippedDoc(
+      buffer,
+      "Wayne Enterprises and June 22, 2026 dpa details",
+    );
     const dpaExport = await dpaDoc.save();
     fs.writeFileSync(tempDpaPath, dpaExport);
 
-    const passCsa = await createStrippedDoc(buffer, "Wayne Enterprises and June 22, 2026 csa details");
+    const passCsa = await createStrippedDoc(
+      buffer,
+      "Wayne Enterprises and June 22, 2026 csa details",
+    );
 
     try {
-      expect(await checkScenarioSuccess("multi-file-assembly", originalDoc, passCsa, tempFilePath)).toBe(true);
-      
+      expect(
+        await checkScenarioSuccess("multi-file-assembly", originalDoc, passCsa, tempFilePath),
+      ).toBe(true);
+
       const failCsa = await createStrippedDoc(buffer, "Missing Wayne details");
-      expect(await checkScenarioSuccess("multi-file-assembly", originalDoc, failCsa, tempFilePath)).toBe(false);
+      expect(
+        await checkScenarioSuccess("multi-file-assembly", originalDoc, failCsa, tempFilePath),
+      ).toBe(false);
     } finally {
       if (fs.existsSync(tempDpaPath)) {
         fs.unlinkSync(tempDpaPath);

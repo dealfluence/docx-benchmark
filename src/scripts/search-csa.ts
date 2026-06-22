@@ -8,7 +8,7 @@ async function main() {
   const doc = await DocumentObject.load(buffer);
   const mapper = new DocumentMapper(doc, true);
   const text = mapper.full_text;
-  
+
   const lines = text.split("\n");
   console.log("=== CSA LINES 360 to 400 ===");
   for (let i = 360; i < 400; i++) {
@@ -18,4 +18,4 @@ async function main() {
   }
 }
 
-main().catch(err => console.error(err));
+main().catch((err) => console.error(err));

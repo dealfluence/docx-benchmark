@@ -13,7 +13,7 @@ async function main() {
   const doc = await DocumentObject.load(buffer);
   const mapper = new DocumentMapper(doc, true);
   const text = mapper.full_text;
-  
+
   console.log(`=== FULL TEXT FOR ${path.basename(resolved)} ===`);
   const regex = /\[([^\]]+)\]/g;
   let match;
@@ -26,7 +26,7 @@ async function main() {
   console.log("=== END OF TEXT ===");
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error(err);
   process.exit(1);
 });

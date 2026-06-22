@@ -12,12 +12,20 @@ export async function checkScenarioSuccess(
   switch (scenarioId) {
     case "form-fill": {
       // Success Criteria: The output plain text must contain the populated values and no longer contain bracketed placeholders.
-      const hasCompany = modPlain.includes("Acme Corporate Technologies, Inc.") || modPlain.includes("Acme Corporate");
+      const hasCompany =
+        modPlain.includes("Acme Corporate Technologies, Inc.") ||
+        modPlain.includes("Acme Corporate");
       const hasInvestor = modPlain.includes("Jane Founder") || modPlain.includes("Jane");
       const hasValuation = modPlain.includes("15,000,000") || modPlain.includes("15,000");
       const hasPlaceholderCompany = modPlain.includes("[Company Name]");
       const hasPlaceholderInvestor = modPlain.includes("[Investor Name]");
-      return hasCompany && hasInvestor && hasValuation && !hasPlaceholderCompany && !hasPlaceholderInvestor;
+      return (
+        hasCompany &&
+        hasInvestor &&
+        hasValuation &&
+        !hasPlaceholderCompany &&
+        !hasPlaceholderInvestor
+      );
     }
 
     case "party-swap": {
@@ -35,16 +43,36 @@ export async function checkScenarioSuccess(
       const match = modPlain.match(jsonRegex);
       if (!match) {
         // Fallback search
-        const hasGov = modPlain.toLowerCase().includes("governinglaw") || modPlain.toLowerCase().includes("governing_law") || modPlain.toLowerCase().includes("governing law");
-        const hasLiab = modPlain.toLowerCase().includes("liabilitycap") || modPlain.toLowerCase().includes("liability_cap") || modPlain.toLowerCase().includes("liability cap");
-        const hasTerms = modPlain.toLowerCase().includes("standardtermslink") || modPlain.toLowerCase().includes("standardtermsurl") || modPlain.toLowerCase().includes("standard_terms") || modPlain.toLowerCase().includes("standard terms");
+        const hasGov =
+          modPlain.toLowerCase().includes("governinglaw") ||
+          modPlain.toLowerCase().includes("governing_law") ||
+          modPlain.toLowerCase().includes("governing law");
+        const hasLiab =
+          modPlain.toLowerCase().includes("liabilitycap") ||
+          modPlain.toLowerCase().includes("liability_cap") ||
+          modPlain.toLowerCase().includes("liability cap");
+        const hasTerms =
+          modPlain.toLowerCase().includes("standardtermslink") ||
+          modPlain.toLowerCase().includes("standardtermsurl") ||
+          modPlain.toLowerCase().includes("standard_terms") ||
+          modPlain.toLowerCase().includes("standard terms");
         return hasGov && hasLiab && hasTerms;
       }
       try {
         const obj = JSON.parse(match[0].trim());
         const keys = Object.keys(obj).map((k) => k.toLowerCase());
-        const hasGoverningLaw = keys.some((k) => k.includes("governinglaw") || k.includes("governing_law") || k.includes("governing law"));
-        const hasLiabilityCap = keys.some((k) => k.includes("liabilitycap") || k.includes("liability_cap") || k.includes("liability cap"));
+        const hasGoverningLaw = keys.some(
+          (k) =>
+            k.includes("governinglaw") ||
+            k.includes("governing_law") ||
+            k.includes("governing law"),
+        );
+        const hasLiabilityCap = keys.some(
+          (k) =>
+            k.includes("liabilitycap") ||
+            k.includes("liability_cap") ||
+            k.includes("liability cap"),
+        );
         const hasStandardTermsLink = keys.some(
           (k) =>
             k.includes("standardtermslink") ||
@@ -58,14 +86,26 @@ export async function checkScenarioSuccess(
         }
 
         const values = Object.values(obj).map((v) => String(v).toLowerCase());
-        const governingLawOk = values.some((v) => v.includes("delaware") || v.includes("state") || v.includes("laws"));
+        const governingLawOk = values.some(
+          (v) => v.includes("delaware") || v.includes("state") || v.includes("laws"),
+        );
         const termsLinkOk = values.some((v) => v.includes("commonpaper.com") || v.includes("http"));
 
         return governingLawOk && termsLinkOk;
       } catch {
-        const hasGov = modPlain.toLowerCase().includes("governinglaw") || modPlain.toLowerCase().includes("governing_law") || modPlain.toLowerCase().includes("governing law");
-        const hasLiab = modPlain.toLowerCase().includes("liabilitycap") || modPlain.toLowerCase().includes("liability_cap") || modPlain.toLowerCase().includes("liability cap");
-        const hasTerms = modPlain.toLowerCase().includes("standardtermslink") || modPlain.toLowerCase().includes("standardtermsurl") || modPlain.toLowerCase().includes("standard_terms") || modPlain.toLowerCase().includes("standard terms");
+        const hasGov =
+          modPlain.toLowerCase().includes("governinglaw") ||
+          modPlain.toLowerCase().includes("governing_law") ||
+          modPlain.toLowerCase().includes("governing law");
+        const hasLiab =
+          modPlain.toLowerCase().includes("liabilitycap") ||
+          modPlain.toLowerCase().includes("liability_cap") ||
+          modPlain.toLowerCase().includes("liability cap");
+        const hasTerms =
+          modPlain.toLowerCase().includes("standardtermslink") ||
+          modPlain.toLowerCase().includes("standardtermsurl") ||
+          modPlain.toLowerCase().includes("standard_terms") ||
+          modPlain.toLowerCase().includes("standard terms");
         return hasGov && hasLiab && hasTerms;
       }
     }
@@ -74,7 +114,10 @@ export async function checkScenarioSuccess(
       // Success Criteria: Inspect word/comments.xml to verify the late payment interest cap comment text is present.
       const commentsPart = modifiedDoc.pkg.parts.find((p) => p.partname.includes("comments"));
       const commentsXml = commentsPart ? String(commentsPart.blob).toLowerCase() : "";
-      const hasInterest = commentsXml.includes("1.0%") || commentsXml.includes("interest") || commentsXml.includes("payment");
+      const hasInterest =
+        commentsXml.includes("1.0%") ||
+        commentsXml.includes("interest") ||
+        commentsXml.includes("payment");
       return hasInterest;
     }
 
@@ -89,11 +132,23 @@ export async function checkScenarioSuccess(
         const dpaDoc = await DocumentObject.load(dpaBuffer);
         const dpaPlain = new DocumentMapper(dpaDoc, true).full_text;
 
-        const hasCustomerName = modPlain.includes("Wayne Enterprises") || modPlain.includes("Acme Corporate Technologies") || modPlain.includes("Wayne");
-        const hasCustomerNameDpa = dpaPlain.includes("Wayne Enterprises") || dpaPlain.includes("Acme Corporate Technologies") || dpaPlain.includes("Wayne");
+        const hasCustomerName =
+          modPlain.includes("Wayne Enterprises") ||
+          modPlain.includes("Acme Corporate Technologies") ||
+          modPlain.includes("Wayne");
+        const hasCustomerNameDpa =
+          dpaPlain.includes("Wayne Enterprises") ||
+          dpaPlain.includes("Acme Corporate Technologies") ||
+          dpaPlain.includes("Wayne");
 
-        const hasDate = modPlain.includes("June 22, 2026") || modPlain.includes("2026") || modPlain.includes("June 22");
-        const hasDateDpa = dpaPlain.includes("June 22, 2026") || dpaPlain.includes("2026") || dpaPlain.includes("June 22");
+        const hasDate =
+          modPlain.includes("June 22, 2026") ||
+          modPlain.includes("2026") ||
+          modPlain.includes("June 22");
+        const hasDateDpa =
+          dpaPlain.includes("June 22, 2026") ||
+          dpaPlain.includes("2026") ||
+          dpaPlain.includes("June 22");
 
         return hasCustomerName && hasCustomerNameDpa && hasDate && hasDateDpa;
       } catch (err) {

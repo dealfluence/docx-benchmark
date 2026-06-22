@@ -517,4 +517,3 @@ CRITICAL INSTRUCTIONS FOR STOPPING:
 
   return { ...result, tempFilePath };
 }
-

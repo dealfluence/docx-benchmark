@@ -8,15 +8,19 @@ async function main() {
   const doc = await DocumentObject.load(buffer);
   const mapper = new DocumentMapper(doc, true);
   const text = mapper.full_text;
-  
+
   const lines = text.split("\n");
   console.log("=== SEARCHING IN BONTERMS CLOUD-TERMS ===");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (line.toLowerCase().includes("interest") || line.toLowerCase().includes("late") || line.toLowerCase().includes("payment")) {
+    if (
+      line.toLowerCase().includes("interest") ||
+      line.toLowerCase().includes("late") ||
+      line.toLowerCase().includes("payment")
+    ) {
       console.log(`Line ${i}: ${line}`);
     }
   }
 }
 
-main().catch(err => console.error(err));
+main().catch((err) => console.error(err));

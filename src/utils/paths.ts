@@ -3,10 +3,10 @@ import * as path from "node:path";
 
 export function getGoldenDocxPath(): string {
   const candidates = [
+    "./fixtures/common-paper/cloud-service-agreement.docx",
     "./golden.docx",
     "../adeu/shared/fixtures/golden.docx",
     "/Users/mkorpela/workspace/adeu-benchmark/golden.docx",
-    "./shared/fixtures/golden.docx",
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) {

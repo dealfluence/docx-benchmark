@@ -12,7 +12,7 @@ const fixtures = [
   "fixtures/series-seed/investment-agreement.docx",
   "fixtures/bonterms/cloud-terms.docx",
   "fixtures/uk-gov/model-services-contract.docx",
-  "fixtures/eu-scc/standard-contractual-clauses.docx"
+  "fixtures/eu-scc/standard-contractual-clauses.docx",
 ];
 
 async function main() {
@@ -23,15 +23,19 @@ async function main() {
     const doc = await DocumentObject.load(buffer);
     const mapper = new DocumentMapper(doc, true);
     const text = mapper.full_text;
-    
+
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      if (line.includes("1.5%") || line.includes("late interest") || (line.toLowerCase().includes("interest") && line.toLowerCase().includes("late"))) {
+      if (
+        line.includes("1.5%") ||
+        line.includes("late interest") ||
+        (line.toLowerCase().includes("interest") && line.toLowerCase().includes("late"))
+      ) {
         console.log(`[${f}] Line ${i}: ${line}`);
       }
     }
   }
 }
 
-main().catch(err => console.error(err));
+main().catch((err) => console.error(err));
