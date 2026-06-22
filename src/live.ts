@@ -133,6 +133,7 @@ export async function runLiveBenchmark() {
           let schemaTokensVal = 0;
           let historyTokensVal = 0;
           let newContentTokensVal = 0;
+          let completeTaskCallsVal = 0;
 
           let finalDoc: DocumentObject | null = null;
           let loopResTempFilePath: string | undefined = undefined;
@@ -159,6 +160,7 @@ export async function runLiveBenchmark() {
               schemaTokensVal = loopRes.schemaTokens || 0;
               historyTokensVal = loopRes.historyTokens || 0;
               newContentTokensVal = loopRes.newContentTokens || 0;
+              completeTaskCallsVal = loopRes.completeTaskCalls || 0;
 
               if (loopRes.finalBuffer) {
                 finalDoc = await DocumentObject.load(loopRes.finalBuffer);
@@ -185,6 +187,7 @@ export async function runLiveBenchmark() {
               schemaTokensVal = loopRes.schemaTokens || 0;
               historyTokensVal = loopRes.historyTokens || 0;
               newContentTokensVal = loopRes.newContentTokens || 0;
+              completeTaskCallsVal = loopRes.completeTaskCalls || 0;
 
               if (loopRes.finalBuffer) {
                 finalDoc = await DocumentObject.load(loopRes.finalBuffer);
@@ -265,6 +268,7 @@ export async function runLiveBenchmark() {
               schemaTokens: 0,
               historyTokens: 0,
               newContentTokens: 0,
+              completeTaskCalls: 0,
               error: apiError,
             });
             console.log(`${getTimestamp()} \x1b[31m[API ERROR]\x1b[0m ${apiError}`);
@@ -286,6 +290,7 @@ export async function runLiveBenchmark() {
             schemaTokens: schemaTokensVal,
             historyTokens: historyTokensVal,
             newContentTokens: newContentTokensVal,
+            completeTaskCalls: completeTaskCallsVal,
           });
 
           console.log(
@@ -303,6 +308,7 @@ export async function runLiveBenchmark() {
         const schStats = getStats(trials.map((t) => t.schemaTokens));
         const histStats = getStats(trials.map((t) => t.historyTokens));
         const newContStats = getStats(trials.map((t) => t.newContentTokens));
+        const completeTaskCallsStats = getStats(trials.map((t) => t.completeTaskCalls));
 
         const roundTripsStats = getStats(trials.map((t) => t.roundTrips));
         const turnsToSuccessStats = getStats(trials.map((t) => t.turnsToSuccess));
@@ -332,6 +338,7 @@ export async function runLiveBenchmark() {
           roundTrips: roundTripsStats,
           turnsToSuccess: turnsToSuccessStats,
           recoveryRate: recoveryRateStats,
+          completeTaskCalls: completeTaskCallsStats,
 
           schemaTokens: schStats,
           historyTokens: histStats,
@@ -349,11 +356,14 @@ export async function runLiveBenchmark() {
 const nodePath = process.argv[1];
 if (nodePath) {
   const currentFilePath = fileURLToPath(import.meta.url);
+  const normalizedCurrent = path.resolve(currentFilePath).replace(/\\/g, "/");
+  const normalizedNode = path.resolve(nodePath).replace(/\\/g, "/");
+
   const isDirectRun =
-    currentFilePath.endsWith(nodePath) ||
-    currentFilePath.replace(/\.ts$/, ".js").endsWith(nodePath) ||
-    nodePath.endsWith("src/live.ts") ||
-    nodePath.endsWith("dist/live.js");
+    normalizedCurrent === normalizedNode ||
+    normalizedCurrent.replace(/\.ts$/, ".js") === normalizedNode ||
+    normalizedNode.endsWith("src/live.ts") ||
+    normalizedNode.endsWith("dist/live.js");
 
   if (isDirectRun) {
     runLiveBenchmark()

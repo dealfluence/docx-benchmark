@@ -57,7 +57,7 @@ To make an honest architectural comparison with multi-turn loops, `safe-docx` to
 Both **Total Tokens** and the **`newContentTokens` floor** are reported to distinguish platform overhead from core document handling.
 
 ### 3.3 Unified Loop Turn Limit
-Both the `safe-docx` and `adeu` agentic loops are governed by a unified execution ceiling of `MAX_TURNS = 10` conversational turns to eliminate execution biases.
+Both the `safe-docx` and `adeu` agentic loops are governed by a unified execution ceiling of `MAX_TURNS = 20` conversational turns to eliminate execution biases.
 
 ### 3.4 Tool Call Observability
 Multi-turn agent executions must report intermediate steps as single-line structured JSON objects rather than scattered stdout logs. This guarantees clean diagnostic paths for automated performance parsers.

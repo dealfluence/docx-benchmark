@@ -1,7 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { performance } from "node:perf_hooks";
-import { GoogleGenerativeAI, Content, FunctionDeclaration, Part } from "@google/generative-ai";
+import {
+  GoogleGenerativeAI,
+  Content,
+  FunctionDeclaration,
+  Part,
+  SchemaType,
+} from "@google/generative-ai";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DocumentObject } from "@adeu/core";
@@ -28,6 +34,7 @@ export interface LoopResult {
   historyTokens?: number;
   newContentTokens?: number;
   tempFilePath?: string;
+  completeTaskCalls?: number;
 }
 
 export interface UnifiedLoopConfig {
@@ -49,7 +56,24 @@ export interface UnifiedLoopConfig {
 
 const getLoopTimestamp = () => `[${new Date().toISOString()}]`;
 
-export const MAX_TURNS = 10;
+export const MAX_TURNS = 20;
+
+export const COMPLETE_TASK_TOOL: FunctionDeclaration = {
+  name: "complete_task",
+  description:
+    "Call this tool to finalize your draft, verify modifications, and submit the document for review once you are certain all edits are completed, verified, and successfully saved.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      summary: {
+        type: SchemaType.STRING,
+        description:
+          "A brief, 1-sentence summary of the exact modifications applied to complete the task.",
+      },
+    },
+    required: ["summary"],
+  },
+};
 
 export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<LoopResult> {
   const {
@@ -90,6 +114,7 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
   let turnsToSuccess = 0;
   let errorTurns = 0;
   let recoveryTurns = 0;
+  let completeTaskCalls = 0;
   let previousTurnHadError = false;
   let success = false;
 
@@ -188,20 +213,57 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
       const functionResponses: Array<{ name: string; response: Record<string, unknown> }> = [];
       let currentTurnHadError = false;
       const turnStart = performance.now();
+      let shouldExitSucceeded = false;
 
       for (const fc of functionCalls) {
         try {
-          console.log(
-            `${getLoopTimestamp()} [INFO] ${prefix} Initiating Tool Call: '${fc.name}'...`,
-          );
-          const toolResult = await executeTool(fc.name, fc.args as Record<string, unknown>, turn);
-          if (toolResult.hadError) currentTurnHadError = true;
-          functionResponses.push({
-            name: fc.name,
-            response: toolResult.error
-              ? { error: toolResult.error }
-              : (toolResult.result as Record<string, unknown>),
-          });
+          if (fc.name === "complete_task") {
+            completeTaskCalls++;
+            console.log(
+              `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Intercepting task submission. Checking validation gate...`,
+            );
+            const isSuccessNow = await checkSuccess(turn);
+            if (isSuccessNow) {
+              console.log(
+                `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Validation gate PASSED! Recording success.`,
+              );
+              success = true;
+              turnsToSuccess = turn;
+              shouldExitSucceeded = true;
+              functionResponses.push({
+                name: fc.name,
+                response: {
+                  success: true,
+                  message: "Submission accepted. All validation checks passed.",
+                },
+              });
+            } else {
+              console.log(
+                `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Validation gate FAILED. Rejecting submission with linter feedback.`,
+              );
+              currentTurnHadError = true;
+              functionResponses.push({
+                name: fc.name,
+                response: {
+                  success: false,
+                  error:
+                    "Submission Rejected: The validation gate failed. Your document does not yet satisfy all task criteria. Please ensure all requested edits are correctly applied, saved to disk, and no placeholders remain before re-submitting.",
+                },
+              });
+            }
+          } else {
+            console.log(
+              `${getLoopTimestamp()} [INFO] ${prefix} Initiating Tool Call: '${fc.name}' with args: ${JSON.stringify(fc.args)}...`,
+            );
+            const toolResult = await executeTool(fc.name, fc.args as Record<string, unknown>, turn);
+            if (toolResult.hadError) currentTurnHadError = true;
+            functionResponses.push({
+              name: fc.name,
+              response: toolResult.error
+                ? { error: toolResult.error }
+                : (toolResult.result as Record<string, unknown>),
+            });
+          }
         } catch (err) {
           currentTurnHadError = true;
           const errMsg = err instanceof Error ? err.message : String(err);
@@ -260,24 +322,8 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
       }
       previousTurnHadError = currentTurnHadError;
 
-      try {
-        console.log(
-          `${getLoopTimestamp()} [INFO] ${prefix} Evaluating success criteria at turn boundary...`,
-        );
-        const isSuccessNow = await checkSuccess(turn);
-        if (isSuccessNow && !success) {
-          console.log(
-            `${getLoopTimestamp()} [INFO] ${prefix} Success criteria achieved at Turn ${turn}!`,
-          );
-          success = true;
-          turnsToSuccess = turn;
-        } else {
-          console.log(
-            `${getLoopTimestamp()} [INFO] ${prefix} Success criteria evaluation: ${isSuccessNow ? "ACHIEVED" : "NOT YET ACHIEVED"}`,
-          );
-        }
-      } catch {
-        // ignore
+      if (shouldExitSucceeded) {
+        break;
       }
     }
   } finally {
@@ -302,6 +348,7 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
     schemaTokens,
     historyTokens,
     newContentTokens,
+    completeTaskCalls,
   };
 }
 
@@ -457,7 +504,7 @@ export async function runSafeDocxLoop(
     "@usejunior/safe-docx",
     "benchmark-client",
   );
-  const geminiTools = mapToGeminiTools(mcpTools);
+  const geminiTools = [...mapToGeminiTools(mcpTools), COMPLETE_TASK_TOOL];
 
   const systemPrompt = `You are an expert contract editor editing Microsoft Word documents (.docx) using the provided Safe Docx MCP tools.
 
@@ -469,7 +516,11 @@ Your task is: ${taskDescription}
 
 You must be highly efficient and minimize the number of tool calls and conversation turns.
 Verify your changes are saved to the correct paths using the 'save' tool before stopping.
-If the task requires adding review feedback or comments, use the appropriate comment tools to anchor your observations to the relevant nodes.`;
+If the task requires adding review feedback or comments, use the appropriate comment tools to anchor your observations to the relevant nodes.
+
+CRITICAL INSTRUCTIONS FOR SUBMISSION:
+1. You MUST explicitly call the 'complete_task' tool to submit your work and finalize the task. Simply writing a final message in plain text will NOT complete the task.
+2. If your submission fails the validation gate, you will receive structured linter feedback. Analyze the feedback, correct the document, and call 'complete_task' again once ready.`;
 
   const originalDoc = await DocumentObject.load(fs.readFileSync(docPath));
 
@@ -532,7 +583,7 @@ export async function runAdeuLoop(
     "@adeu/mcp-server",
     "adeu-benchmark-client",
   );
-  const geminiTools = mapToGeminiTools(mcpTools);
+  const geminiTools = [...mapToGeminiTools(mcpTools), COMPLETE_TASK_TOOL];
 
   const systemPrompt = `You are an expert contract editor editing Microsoft Word documents (.docx) using Adeu Virtual DOM.
 
@@ -545,11 +596,11 @@ Your task is: ${taskDescription}
 Please observe the documents first, analyze the content, then perform modifications using your batch processing capabilities.
 If the task requires adding review feedback or comments, attach comments to the appropriate targets.
 
-CRITICAL INSTRUCTIONS FOR STOPPING:
-1. Once you have verified that the text of your edits is present in the document, you MUST stop calling tools immediately. DO NOT call any more tools (do not call 'read_document' or 'apply_patch' again).
+CRITICAL INSTRUCTIONS FOR SUBMISSION:
+1. Once you have verified that the text of your edits is present in the document, you MUST explicitly call the 'complete_task' tool to submit your work and finalize the task. Simply writing a final message in plain text will NOT complete the task.
 2. The CriticMarkup tags (such as '{++' and '++}' for inserted text, or '{--' and '--}' for deleted text) represent the track changes of your edits. These are normal, expected, and correct.
 3. Even if the 'read_document' output shows complex tracked changes (such as headings or paragraph breaks marked as deleted, split, or inserted), DO NOT attempt to "clean up", "fix", accept, or reject these tracked changes. DO NOT make any further edits to improve formatting or structure.
-4. As long as your text is in the document, simply output a final message in plain text confirming that the task is complete. This will end your turn.`;
+4. If your submission fails the validation gate, you will receive structured linter feedback. Analyze the feedback, correct the document, and call 'complete_task' again once ready.`;
 
   const originalDoc = await DocumentObject.load(docBuffer);
 

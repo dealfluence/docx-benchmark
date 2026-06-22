@@ -19,6 +19,7 @@ export interface SingleTrialRun {
   schemaTokens: number;
   historyTokens: number;
   newContentTokens: number;
+  completeTaskCalls: number;
   error?: string;
 }
 
@@ -48,6 +49,7 @@ export interface LiveTrialSummary {
   roundTrips: Stats;
   turnsToSuccess: Stats;
   recoveryRate: Stats;
+  completeTaskCalls: Stats;
   schemaTokens?: Stats;
   historyTokens?: Stats;
   newContentTokens?: Stats;
@@ -115,6 +117,7 @@ export function printLiveConsoleSummary(summaries: LiveTrialSummary[], reps: num
       "Xml Integrity": s.xmlIntegrityRate,
       Trips: `${s.roundTrips.mean.toFixed(1)} [${s.roundTrips.min}-${s.roundTrips.max}]`,
       TurnsSucc: `${s.turnsToSuccess.mean.toFixed(1)} [${s.turnsToSuccess.min}-${s.turnsToSuccess.max}]`,
+      Submits: `${s.completeTaskCalls.mean.toFixed(1)} [${s.completeTaskCalls.min}-${s.completeTaskCalls.max}]`,
       "Tokens In": formatTokenMetric(s.tokensIn, s.newContentTokens, isSafe, false),
       "Tokens Out": `${Math.round(s.tokensOut.mean)} [${Math.round(s.tokensOut.min)}-${Math.round(s.tokensOut.max)}]`,
       "Total Tokens": formatTokenMetric(s.totalTokens, totalFloorStats, isSafe, false),
@@ -159,8 +162,8 @@ export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: numbe
   for (const sId of scenariosGrouped) {
     const sResults = summaries.filter((s) => s.scenarioId === sId);
     md += `### Scenario: ${sResults[0]?.scenarioName} (\`${sId}\`)\n\n`;
-    md += `| Paradigm | Doc Size | Success Rate | XML Delta (Surgicality) | Fidelity Score (Avg [Min-Max]) | XML Integrity | Round Trips (Avg) | Turns to Success (Avg) | Recovery Rate (Avg) | Input Tokens (Avg [Min-Max]) | Output Tokens (Avg [Min-Max]) | Total Tokens (Avg [Min-Max]) | Latency (Avg [Min-Max]) |\n`;
-    md += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
+    md += `| Paradigm | Doc Size | Success Rate | XML Delta (Surgicality) | Fidelity Score (Avg [Min-Max]) | XML Integrity | Round Trips (Avg) | Turns to Success (Avg) | Task Submits (Avg [Min-Max]) | Recovery Rate (Avg) | Input Tokens (Avg [Min-Max]) | Output Tokens (Avg [Min-Max]) | Total Tokens (Avg [Min-Max]) | Latency (Avg [Min-Max]) |\n`;
+    md += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
 
     for (const s of sResults) {
       const isSafe = s.paradigm === "safe-docx";
@@ -173,7 +176,7 @@ export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: numbe
         : undefined;
 
       md +=
-        `| **${s.paradigm}** | ${s.docSize} | ${s.successRate} | ${s.xmlDelta.mean.toFixed(0)} [${s.xmlDelta.min}-${s.xmlDelta.max}] | ${s.fidelity.mean.toFixed(1)}% [${s.fidelity.min}-${s.fidelity.max}] | ${s.xmlIntegrityRate} | ${s.roundTrips.mean.toFixed(1)} [${s.roundTrips.min}-${s.roundTrips.max}] | ${s.turnsToSuccess.mean.toFixed(1)} [${s.turnsToSuccess.min}-${s.turnsToSuccess.max}] | ${(s.recoveryRate.mean * 100).toFixed(1)}% [${(s.recoveryRate.min * 100).toFixed(1)}%-${(s.recoveryRate.max * 100).toFixed(1)}%] | ` +
+        `| **${s.paradigm}** | ${s.docSize} | ${s.successRate} | ${s.xmlDelta.mean.toFixed(0)} [${s.xmlDelta.min}-${s.xmlDelta.max}] | ${s.fidelity.mean.toFixed(1)}% [${s.fidelity.min}-${s.fidelity.max}] | ${s.xmlIntegrityRate} | ${s.roundTrips.mean.toFixed(1)} [${s.roundTrips.min}-${s.roundTrips.max}] | ${s.turnsToSuccess.mean.toFixed(1)} [${s.turnsToSuccess.min}-${s.turnsToSuccess.max}] | ${s.completeTaskCalls.mean.toFixed(1)} [${s.completeTaskCalls.min}-${s.completeTaskCalls.max}] | ${(s.recoveryRate.mean * 100).toFixed(1)}% [${(s.recoveryRate.min * 100).toFixed(1)}%-${(s.recoveryRate.max * 100).toFixed(1)}%] | ` +
         `${formatTokenMetric(s.tokensIn, s.newContentTokens, isSafe, true)} | ` +
         `${Math.round(s.tokensOut.mean).toLocaleString()} [${Math.round(s.tokensOut.min).toLocaleString()}-${Math.round(s.tokensOut.max).toLocaleString()}] | ` +
         `${formatTokenMetric(s.totalTokens, totalFloorStats, isSafe, true)} | ` +
