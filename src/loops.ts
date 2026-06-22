@@ -47,6 +47,8 @@ export interface UnifiedLoopConfig {
   loopName?: string;
 }
 
+const getLoopTimestamp = () => `[${new Date().toISOString()}]`;
+
 export const MAX_TURNS = 10;
 
 export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<LoopResult> {
@@ -63,6 +65,9 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
     loopName,
   } = config;
 
+  console.log(
+    `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Configuring model client: ${modelName}`,
+  );
   const modelInstance = gemini.getGenerativeModel(
     {
       model: modelName,
@@ -91,6 +96,9 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
   let schemaTokensPerTurn = 0;
   if (tools.length > 0) {
     try {
+      console.log(
+        `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimating tool schema token footprint...`,
+      );
       const modelNoTools = gemini.getGenerativeModel({ model: modelName });
       const modelWithTools = gemini.getGenerativeModel({
         model: modelName,
@@ -100,6 +108,9 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
       const countNoTools = await modelNoTools.countTokens({ contents: testContent });
       const countWithTools = await modelWithTools.countTokens({ contents: testContent });
       schemaTokensPerTurn = Math.max(0, countWithTools.totalTokens - countNoTools.totalTokens);
+      console.log(
+        `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimated Schema Tokens per Turn: ${schemaTokensPerTurn}`,
+      );
     } catch {
       schemaTokensPerTurn = 2500;
     }
@@ -117,14 +128,26 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
       const isVerbose = process.argv.includes("--verbose");
       if (isVerbose) {
         console.log(
-          `\x1b[36m${prefix}\x1b[0m Sending prompt content length: ${contents.length} messages.`,
+          `${getLoopTimestamp()} \x1b[36m${prefix}\x1b[0m Sending prompt content length: ${contents.length} messages.`,
         );
       }
 
+      console.log(
+        `${getLoopTimestamp()} [INFO] ${prefix} Calling generateContent... (Timeout configured: ${GEMINI_TIMEOUT_MS}ms)`,
+      );
       const geminiResponse = await withTimeout(
         modelInstance.generateContent({ contents }),
         GEMINI_TIMEOUT_MS,
         `Gemini API call timed out after ${GEMINI_TIMEOUT_MS}ms`,
+      ).catch((err) => {
+        console.error(
+          `${getLoopTimestamp()} \x1b[31m[ERROR] ${prefix} generateContent failed or was aborted!\x1b[0m`,
+        );
+        throw err;
+      });
+
+      console.log(
+        `${getLoopTimestamp()} [INFO] ${prefix} generateContent call returned successfully.`,
       );
 
       const promptTokensThisTurn = geminiResponse.response.usageMetadata?.promptTokenCount || 0;
@@ -148,14 +171,14 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
 
       if (isVerbose) {
         console.log(
-          `\x1b[36m${prefix}\x1b[0m Model generated ${parts.length} parts and ${functionCalls.length} function calls.`,
+          `${getLoopTimestamp()} \x1b[36m${prefix}\x1b[0m Model generated ${parts.length} parts and ${functionCalls.length} function calls.`,
         );
       }
 
       if (functionCalls.length === 0) {
-        if (isVerbose) {
-          console.log(`\x1b[36m${prefix}\x1b[0m No function calls generated. Breaking loop.`);
-        }
+        console.log(
+          `${getLoopTimestamp()} [INFO] ${prefix} No function calls generated. Breaking loop (Task is finalized).`,
+        );
         break;
       }
 
@@ -168,6 +191,9 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
 
       for (const fc of functionCalls) {
         try {
+          console.log(
+            `${getLoopTimestamp()} [INFO] ${prefix} Initiating Tool Call: '${fc.name}'...`,
+          );
           const toolResult = await executeTool(fc.name, fc.args as Record<string, unknown>, turn);
           if (toolResult.hadError) currentTurnHadError = true;
           functionResponses.push({
@@ -179,7 +205,13 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
         } catch (err) {
           currentTurnHadError = true;
           const errMsg = err instanceof Error ? err.message : String(err);
-          console.error(`\x1b[31m${prefix} ERROR in Tool Response for ${fc.name}:\x1b[0m`, errMsg);
+          console.error(
+            `${getLoopTimestamp()} \x1b[31m[ERROR] ${prefix} Exception occurred inside tool '${fc.name}':\x1b[0m`,
+            errMsg,
+          );
+          if (err instanceof Error && err.stack) {
+            console.error(`Stack trace:\n${err.stack}`);
+          }
           functionResponses.push({
             name: fc.name,
             response: { error: errMsg },
@@ -202,6 +234,7 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
 
         console.log(
           JSON.stringify({
+            timestamp: new Date().toISOString(),
             turn,
             paradigm: loopName,
             reasoning: reasoningText || undefined,
@@ -228,10 +261,20 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
       previousTurnHadError = currentTurnHadError;
 
       try {
+        console.log(
+          `${getLoopTimestamp()} [INFO] ${prefix} Evaluating success criteria at turn boundary...`,
+        );
         const isSuccessNow = await checkSuccess(turn);
         if (isSuccessNow && !success) {
+          console.log(
+            `${getLoopTimestamp()} [INFO] ${prefix} Success criteria achieved at Turn ${turn}!`,
+          );
           success = true;
           turnsToSuccess = turn;
+        } else {
+          console.log(
+            `${getLoopTimestamp()} [INFO] ${prefix} Success criteria evaluation: ${isSuccessNow ? "ACHIEVED" : "NOT YET ACHIEVED"}`,
+          );
         }
       } catch {
         // ignore
@@ -263,6 +306,9 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
 }
 
 export async function connectMcpClient(packageName: string, clientName: string) {
+  console.log(
+    `${getLoopTimestamp()} [INFO] Connecting to MCP Server package '${packageName}' (client: '${clientName}')...`,
+  );
   const transport = new StdioClientTransport({
     command: "npx",
     args: ["-y", packageName],
@@ -273,10 +319,20 @@ export async function connectMcpClient(packageName: string, clientName: string) 
     MCP_CONNECT_TIMEOUT_MS,
     `${clientName} connection timed out after ${MCP_CONNECT_TIMEOUT_MS}ms`,
   );
+  console.log(
+    `${getLoopTimestamp()} [INFO] Connection handshake completed with MCP Server '${clientName}'.`,
+  );
+
+  console.log(
+    `${getLoopTimestamp()} [INFO] Retrieving tool registrations from MCP Server '${clientName}'...`,
+  );
   const toolsResponse = await withTimeout(
     mcpClient.listTools(),
     MCP_TOOL_TIMEOUT_MS,
     `${clientName} listTools timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
+  );
+  console.log(
+    `${getLoopTimestamp()} [INFO] Successfully listed ${toolsResponse.tools.length} tool(s) from MCP Server '${clientName}'.`,
   );
   return { mcpClient, tools: toolsResponse.tools };
 }
@@ -352,10 +408,16 @@ export function makeMcpToolExecutor(
     if (options.forceSaveOverwrite && name === "save") {
       cleanArgs.allow_overwrite = true;
     }
+    console.log(
+      `${getLoopTimestamp()} [INFO] [${options.clientName}] Dispatching tool call '${name}'...`,
+    );
     const toolResult = await withTimeout(
       mcpClient.callTool({ name, arguments: cleanArgs }),
       MCP_TOOL_TIMEOUT_MS,
       `MCP tool call to '${name}' on client '${options.clientName}' timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
+    );
+    console.log(
+      `${getLoopTimestamp()} [INFO] [${options.clientName}] Tool call '${name}' returned with status.`,
     );
     return {
       result: { result: (toolResult as McpToolResult).content },
@@ -371,6 +433,10 @@ export async function runSafeDocxLoop(
   scenarioId: string,
   taskDescription: string,
 ): Promise<LoopResult> {
+  console.log(
+    `${getLoopTimestamp()} [INFO] [Safe Docx Loop] Initializing loop session for scenario '${scenarioId}'...`,
+  );
+
   const tempDir = getTempDirPath();
   if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true });
@@ -393,19 +459,17 @@ export async function runSafeDocxLoop(
   );
   const geminiTools = mapToGeminiTools(mcpTools);
 
-  const systemPrompt = `You are an expert contract editor editing a Microsoft Word document (.docx) using the provided Safe Docx MCP tools.
-The document is currently located at path: "${tempFilePath}".
+  const systemPrompt = `You are an expert contract editor editing Microsoft Word documents (.docx) using the provided Safe Docx MCP tools.
+
+Documents involved in this task:
+- Primary Document: "${tempFilePath}"
+${tempDpaPath ? `- Companion DPA Document: "${tempDpaPath}"` : ""}
+
 Your task is: ${taskDescription}
 
 You must be highly efficient and minimize the number of tool calls and conversation turns.
-Follow this precise strategy:
-1. Locate the content to change by calling 'grep' with a specific pattern. Do NOT read the entire document if not needed.
-2. Edit the document content using 'replace_text' or 'batch_edit' (if multiple edits are needed). Ensure your edits are precise. If multiple edits are required, perform them in batch or in a single turn if possible.
-   CRITICAL: If you use 'batch_edit', every object inside the 'steps' array MUST contain a unique, non-empty string 'step_id' (e.g. "step_1", "step_2").
-3. Save the document by calling 'save' immediately after editing.
-4. Stop calling tools once saved.
-
-Do not re-read the entire document after editing unless strictly necessary. Do not wander or take unnecessary turns. Your goal is to finish the task in 2-3 turns.`;
+Verify your changes are saved to the correct paths using the 'save' tool before stopping.
+If the task requires adding review feedback or comments, use the appropriate comment tools to anchor your observations to the relevant nodes.`;
 
   const originalDoc = await DocumentObject.load(fs.readFileSync(docPath));
 
@@ -443,6 +507,10 @@ export async function runAdeuLoop(
   scenarioId: string,
   taskDescription: string,
 ): Promise<LoopResult> {
+  console.log(
+    `${getLoopTimestamp()} [INFO] [Adeu Loop] Initializing loop session for scenario '${scenarioId}'...`,
+  );
+
   const tempDir = getTempDirPath();
   if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true });
@@ -466,22 +534,16 @@ export async function runAdeuLoop(
   );
   const geminiTools = mapToGeminiTools(mcpTools);
 
-  const systemPrompt = `You are an expert contract editor editing a Microsoft Word document (.docx) using Adeu Virtual DOM.
-The document is currently located at path: "${tempFilePath}".
+  const systemPrompt = `You are an expert contract editor editing Microsoft Word documents (.docx) using Adeu Virtual DOM.
+
+Documents involved in this task:
+- Primary Document: "${tempFilePath}"
+${tempDpaPath ? `- Companion DPA Document: "${tempDpaPath}"` : ""}
+
 Your task is: ${taskDescription}
 
-Please observe the document first by calling the 'read_docx' tool, analyze the content, then perform edits by calling 'process_document_batch' with transactional modifications.
-
-CRITICAL PARAMETER FORMAT RULES:
-1. The 'changes' parameter in 'process_document_batch' is a native JSON array of objects. Do NOT double-serialize or pass JSON string strings inside the array.
-   Correct format:
-   "changes": [
-     { "type": "modify", "target_text": "old text", "new_text": "new text" }
-   ]
-   Incorrect format:
-   "changes": [
-     "{\"type\": \"modify\", \"target_text\": \"old text\"}"
-   ]
+Please observe the documents first, analyze the content, then perform modifications using your batch processing capabilities.
+If the task requires adding review feedback or comments, attach comments to the appropriate targets.
 
 CRITICAL INSTRUCTIONS FOR STOPPING:
 1. Once you have verified that the text of your edits is present in the document, you MUST stop calling tools immediately. DO NOT call any more tools (do not call 'read_document' or 'apply_patch' again).

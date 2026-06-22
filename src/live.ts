@@ -18,6 +18,8 @@ Supported operations:
 - { "type": "reject", "target_id": string }
 - { "type": "reply", "target_id": string, "text": string }`;
 
+const getTimestamp = () => `[${new Date().toISOString()}]`;
+
 import { runSafeDocxLoop, runAdeuLoop } from "./loops.js";
 import {
   getStats,
@@ -80,9 +82,9 @@ export async function runLiveBenchmark() {
 
   console.log(`\n\x1b[1m\x1b[34m[Adeu Live Provider Benchmark (Real-world Measurement)]\x1b[0m`);
   console.log(
-    `Configured Providers: ${clients.map((c) => c.provider + " (" + c.model + ")").join(", ")}`,
+    `${getTimestamp()} [INFO] Configured Providers: ${clients.map((c) => c.provider + " (" + c.model + ")").join(", ")}`,
   );
-  console.log(`Repetitions (N): ${reps}\n`);
+  console.log(`${getTimestamp()} [INFO] Repetitions (N): ${reps}\n`);
 
   const summaries: LiveTrialSummary[] = [];
 
@@ -95,21 +97,26 @@ export async function runLiveBenchmark() {
 
       for (const paradigm of paradigms) {
         console.log(
-          `Running: \x1b[32m${provider}\x1b[0m | \x1b[36m${scenario.id}\x1b[0m | \x1b[35m${paradigm}\x1b[0m | Reps: ${reps}...`,
+          `${getTimestamp()} [INFO] Running: \x1b[32m${provider}\x1b[0m | \x1b[36m${scenario.id}\x1b[0m | \x1b[35m${paradigm}\x1b[0m | Reps: ${reps}...`,
         );
 
         const trials: SingleTrialRun[] = [];
 
         for (let rep = 0; rep < reps; rep++) {
-          process.stdout.write(`  Rep ${rep + 1}/${reps}... `);
+          console.log(
+            `${getTimestamp()} [INFO] Starting Rep ${rep + 1}/${reps} for Paradigm '${paradigm}'...`,
+          );
 
           const scenarioDocPath = path.resolve(scenario.fixturePath);
           if (!fs.existsSync(scenarioDocPath)) {
-            console.error(`\n[ERROR] Fixture path not found: ${scenarioDocPath}`);
+            console.error(`\n${getTimestamp()} [ERROR] Fixture path not found: ${scenarioDocPath}`);
             continue;
           }
           const scenarioBuffer = fs.readFileSync(scenarioDocPath);
           const originalDoc = await DocumentObject.load(scenarioBuffer);
+          console.log(
+            `${getTimestamp()} [INFO] Original document '${scenario.fixturePath}' loaded successfully (${originalDoc.part.blob.length} characters).`,
+          );
 
           const start = performance.now();
           let tokensIn = 0;
@@ -122,6 +129,7 @@ export async function runLiveBenchmark() {
           let turnsToSuccess = 0;
           let recoveryRate = 0;
           let apiError: string | undefined = undefined;
+          let apiErrorStack: string | undefined = undefined;
           let schemaTokensVal = 0;
           let historyTokensVal = 0;
           let newContentTokensVal = 0;
@@ -131,6 +139,9 @@ export async function runLiveBenchmark() {
           try {
             if (paradigm === "safe-docx") {
               const fullTaskDescription = getFullTaskDescription(scenario);
+              console.log(
+                `${getTimestamp()} [INFO] Executing runSafeDocxLoop with task: "${fullTaskDescription.replace(/\n/g, " ")}"`,
+              );
               const loopRes = await runSafeDocxLoop(
                 client as GoogleGenerativeAI,
                 model,
@@ -154,6 +165,9 @@ export async function runLiveBenchmark() {
               }
             } else if (paradigm === "adeu") {
               const fullTaskDescription = getFullTaskDescription(scenario);
+              console.log(
+                `${getTimestamp()} [INFO] Executing runAdeuLoop with task: "${fullTaskDescription.replace(/\n/g, " ")}"`,
+              );
               const loopRes = await runAdeuLoop(
                 client as GoogleGenerativeAI,
                 model,
@@ -180,6 +194,9 @@ export async function runLiveBenchmark() {
             if (finalDoc) {
               const exported = await finalDoc.save();
               if (exported && exported.length > 0) {
+                console.log(
+                  `${getTimestamp()} [INFO] Evaluating trial output preservation and structural fidelity...`,
+                );
                 const evalResult = await evaluateTrial(
                   originalDoc,
                   finalDoc,
@@ -194,10 +211,22 @@ export async function runLiveBenchmark() {
             }
           } catch (e: unknown) {
             apiError = e instanceof Error ? e.message : String(e);
+            apiErrorStack = e instanceof Error ? e.stack : undefined;
+            console.error(
+              `\n${getTimestamp()} \x1b[31m[RUN EXCEPTION] Paradigm: ${paradigm}, Scenario: ${scenario.id}\x1b[0m`,
+            );
+            if (apiErrorStack) {
+              console.error(`Stack trace:\n${apiErrorStack}`);
+            } else {
+              console.error(e);
+            }
           } finally {
             if (loopResTempFilePath) {
               if (fs.existsSync(loopResTempFilePath)) {
                 try {
+                  console.log(
+                    `${getTimestamp()} [INFO] Cleaning up temporary document file: ${loopResTempFilePath}`,
+                  );
                   fs.unlinkSync(loopResTempFilePath);
                 } catch {
                   // ignore
@@ -206,6 +235,9 @@ export async function runLiveBenchmark() {
               const companionDpaPath = loopResTempFilePath.replace(".docx", "_dpa.docx");
               if (fs.existsSync(companionDpaPath)) {
                 try {
+                  console.log(
+                    `${getTimestamp()} [INFO] Cleaning up companion temporary DPA file: ${companionDpaPath}`,
+                  );
                   fs.unlinkSync(companionDpaPath);
                 } catch {
                   // ignore
@@ -235,7 +267,7 @@ export async function runLiveBenchmark() {
               newContentTokens: 0,
               error: apiError,
             });
-            console.log(`\x1b[31m[API ERROR]\x1b[0m ${apiError}`);
+            console.log(`${getTimestamp()} \x1b[31m[API ERROR]\x1b[0m ${apiError}`);
             continue;
           }
 
@@ -257,7 +289,7 @@ export async function runLiveBenchmark() {
           });
 
           console.log(
-            `Latency: ${(latencyMs / 1000).toFixed(2)}s | Tokens: ${tokensIn} in, ${tokensOut} out | Trips: ${roundTrips} | Integrity: ${xmlIntegrity} | Fidelity: ${fidelity}% | Success: ${success ? "🟢 YES" : "🔴 NO"}`,
+            `${getTimestamp()} Latency: ${(latencyMs / 1000).toFixed(2)}s | Tokens: ${tokensIn} in, ${tokensOut} out | Trips: ${roundTrips} | Integrity: ${xmlIntegrity} | Fidelity: ${fidelity}% | Success: ${success ? "🟢 YES" : "🔴 NO"}`,
           );
         }
 

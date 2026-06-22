@@ -6,7 +6,7 @@ dotenv.config();
 
 export const GEMINI_TIMEOUT_MS = process.env.GEMINI_TIMEOUT_MS
   ? parseInt(process.env.GEMINI_TIMEOUT_MS, 10)
-  : 60000;
+  : 180000;
 export const MCP_CONNECT_TIMEOUT_MS = process.env.MCP_CONNECT_TIMEOUT_MS
   ? parseInt(process.env.MCP_CONNECT_TIMEOUT_MS, 10)
   : 30000;
