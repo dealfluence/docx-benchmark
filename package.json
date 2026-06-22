@@ -15,7 +15,8 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "prepare": "husky",
     "benchmark": "tsc && node dist/live.js",
-    "benchmark:quick": "tsc && node dist/live.js --quick"
+    "benchmark:quick": "tsc && node dist/live.js --quick",
+    "inspect-fixture": "tsc && node dist/scripts/inspect-fixture.js"
   },
   "keywords": [],
   "author": "",

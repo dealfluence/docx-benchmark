@@ -27,3 +27,12 @@ export function clearTempDirectory(): void {
   }
   fs.mkdirSync(tempDir, { recursive: true });
 }
+
+export function getFixturesDirPath(): string {
+  return path.resolve("./fixtures");
+}
+
+export function getFixturePath(org: string, filename: string): string {
+  const fixturesDir = getFixturesDirPath();
+  return path.join(fixturesDir, org, filename);
+}
