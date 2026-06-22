@@ -106,4 +106,54 @@ export const scenarios: Scenario[] = [
     replacementText: "",
     isAgentic: true,
   },
+  {
+    id: "comment-driven-edit",
+    name: "Comment-Driven Edit (Reply and Modify)",
+    description:
+      "Read Comment 7 in Section 5.2 which says 'Added Esko Aho as counter party representative for indemnification purposes'. Reply to the comment with 'Acknowledged — updated representative name to Esko Aho.' and ensure the text 'Esko Aho' is present in Section 5.2.",
+    targetText: "",
+    replacementText: "",
+    reviewAction: {
+      type: "reply",
+      targetId: "Com:7",
+      payload: "Acknowledged — updated representative name to Esko Aho.",
+    },
+    isAgentic: true,
+  },
+  {
+    id: "multi-location-update",
+    name: "Multi-Location Update (Footer and Signature Block)",
+    description:
+      "The company 'NordicTech Solutions Inc.' is rebranding to 'NordicGlobal Solutions Inc.' Update ALL occurrences in the document body, headers, footers, and the signature block. Do not miss any occurrence.",
+    targetText: "",
+    replacementText: "",
+    isAgentic: true,
+  },
+  {
+    id: "defined-term-insertion",
+    name: "Defined Term Insertion (Add and Propagate)",
+    description:
+      "Add a new defined term 'Permitted Purpose' to Section 1.1 Definitions with the text: '\"Permitted Purpose\" means the purpose of receiving, accessing, and using the Services as contemplated by this Agreement.' Then, in Section 4.1 (Confidentiality), replace the phrase 'for any purpose outside the scope of this Agreement' with 'for any purpose outside the Permitted Purpose'.",
+    targetText: "",
+    replacementText: "",
+    isAgentic: true,
+  },
+  {
+    id: "liability-cap-rewrite",
+    name: "Liability Cap Rewrite (Read-Reason-Edit)",
+    description:
+      "In Section 6.1, the liability cap is currently 'three (3) months'. Change it to 'twelve (12) months' — update both the word and the numeral in parentheses.",
+    targetText: "",
+    replacementText: "",
+    isAgentic: true,
+  },
+  {
+    id: "clause-deletion-and-renumber",
+    name: "Clause Deletion and Renumber (Remove Section)",
+    description:
+      "Delete Section 8.2 (Assignment) entirely. Then renumber the remaining Section 8.3 (Entire Agreement) to become Section 8.2.",
+    targetText: "",
+    replacementText: "",
+    isAgentic: true,
+  },
 ];

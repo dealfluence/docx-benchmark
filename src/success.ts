@@ -96,6 +96,52 @@ export function checkScenarioSuccess(
       return has075 && !has15;
     }
 
+    case "comment-driven-edit": {
+      // Esko Aho must be present in Section 5.2 text AND a reply to Com:7 must exist
+      const hasEskoAho = modPlain.includes("Esko Aho");
+      // Check for reply in CriticMarkup — reply content should appear in the markup
+      const hasReply =
+        modCritic.includes("Acknowledged") || modCritic.includes("updated representative");
+      return hasEskoAho && hasReply;
+    }
+
+    case "multi-location-update": {
+      // All occurrences of NordicTech must become NordicGlobal
+      const hasNordicGlobal = modPlain.includes("NordicGlobal Solutions Inc.");
+      const hasOldName = modPlain.includes("NordicTech Solutions Inc.");
+      return hasNordicGlobal && !hasOldName;
+    }
+
+    case "defined-term-insertion": {
+      // New defined term must exist in Section 1.1
+      const hasDefinedTerm = modPlain.includes("Permitted Purpose");
+      const hasDefinition = modPlain.includes("receiving, accessing, and using the Services");
+      // Must be used in Section 4.1 replacing old phrasing
+      const hasUsage = modPlain.includes("outside the Permitted Purpose");
+      const hasOldPhrase = modPlain.includes("outside the scope of this Agreement");
+      return hasDefinedTerm && hasDefinition && hasUsage && !hasOldPhrase;
+    }
+
+    case "liability-cap-rewrite": {
+      // Must contain twelve (12) months, must NOT contain three (3) months
+      const hasTwelve =
+        modPlain.includes("twelve (12) months") || modPlain.includes("twelve(12) months");
+      const hasThree =
+        modPlain.includes("three (3) months") || modPlain.includes("three(3) months");
+      return hasTwelve && !hasThree;
+    }
+
+    case "clause-deletion-and-renumber": {
+      // Section 8.2 should now be Entire Agreement (not Assignment)
+      const text = normalizedMod.toLowerCase();
+      const hasAssignment = text.includes("8.2 assignment") || text.includes("8.2assignment");
+      const hasEntireAt82 =
+        text.includes("8.2 entire agreement") || text.includes("8.2entire agreement");
+      // Old section 8.3 should no longer exist
+      const has83 = text.includes("8.3");
+      return !hasAssignment && hasEntireAt82 && !has83;
+    }
+
     default:
       return false;
   }

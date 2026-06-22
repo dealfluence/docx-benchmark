@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { scenarios } from "./scenarios.js";
 
 describe("scenarios", () => {
-  it("should have ten defined scenarios", () => {
-    expect(scenarios).toHaveLength(10);
+  it("should have fifteen defined scenarios", () => {
+    expect(scenarios).toHaveLength(15);
   });
 
   it("should have correct properties for each scenario", () => {
@@ -54,5 +54,27 @@ describe("scenarios", () => {
     const s10 = scenarios.find((s) => s.id === "search-then-compute");
     expect(s10).toBeDefined();
     expect(s10?.isAgentic).toBe(true);
+
+    const s11 = scenarios.find((s) => s.id === "comment-driven-edit");
+    expect(s11).toBeDefined();
+    expect(s11?.isAgentic).toBe(true);
+    expect(s11?.reviewAction?.type).toBe("reply");
+    expect(s11?.reviewAction?.targetId).toBe("Com:7");
+
+    const s12 = scenarios.find((s) => s.id === "multi-location-update");
+    expect(s12).toBeDefined();
+    expect(s12?.isAgentic).toBe(true);
+
+    const s13 = scenarios.find((s) => s.id === "defined-term-insertion");
+    expect(s13).toBeDefined();
+    expect(s13?.isAgentic).toBe(true);
+
+    const s14 = scenarios.find((s) => s.id === "liability-cap-rewrite");
+    expect(s14).toBeDefined();
+    expect(s14?.isAgentic).toBe(true);
+
+    const s15 = scenarios.find((s) => s.id === "clause-deletion-and-renumber");
+    expect(s15).toBeDefined();
+    expect(s15?.isAgentic).toBe(true);
   });
 });

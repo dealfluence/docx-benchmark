@@ -28,6 +28,15 @@ Detailed design choices, cost formulas, and scoring rules are documented in the 
 4.  **Bulk Rewrite (`bulk-rewrite`)**: Rewrites an entire section. Testing the boundaries where surgical output advantages are minimized.
 5.  **Whole Document Restyle (`whole-document-restyle`)**: Global capitalization check touching most document elements.
 6.  **No-Op / Already Correct (`no-op`)**: Robustness check where the target edit is absent; tests whether the model hallucinates modifications.
+7.  **Conditional Clause Insertion (`conditional-edit`)**: Inspects governing law, conditionally inserts jurisdiction clause. Tests read-then-decide agentic patterns.
+8.  **Dependent Multi-Target (`dependent-multi-target`)**: Inserts a new section, renumbers subsequent sections, and updates internal cross-references.
+9.  **Selective Verify and Repair (`selective-verify-and-repair`)**: Accepts all tracked changes except those in a specific section. Tests selective revision handling.
+10. **Search-then-Compute (`search-then-compute`)**: Finds a numeric value, performs arithmetic, and replaces it with the computed result.
+11. **Comment-Driven Edit (`comment-driven-edit`)**: Reads a margin comment, verifies the described change is present, and replies to the comment. Tests comment interaction.
+12. **Multi-Location Update (`multi-location-update`)**: Rebrands a company name across body text, headers, footers, and signature blocks. Tests exhaustive document-wide search.
+13. **Defined Term Insertion (`defined-term-insertion`)**: Adds a new defined term to the definitions section, then propagates its usage into another clause.
+14. **Liability Cap Rewrite (`liability-cap-rewrite`)**: Reads a liability cap duration, updates both the written word and parenthetical numeral.
+15. **Clause Deletion and Renumber (`clause-deletion-and-renumber`)**: Deletes an entire section and renumbers the subsequent section.
 
 ---
 
