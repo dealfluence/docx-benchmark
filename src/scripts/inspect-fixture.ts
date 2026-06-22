@@ -30,6 +30,7 @@ async function main() {
     const wordCount = plainText.split(/\s+/).filter(Boolean).length;
     console.log(`- Word Count (plain text): ${wordCount}`);
     console.log(`- Paragraphs detected: ${plainText.split("\n\n").length}`);
+    console.log(`- Text Preview:\n--------------------------------------------------\n${plainText.substring(0, 1000)}\n--------------------------------------------------`);
 
     // 2. CriticMarkup Stats
     const mapperCritic = new DocumentMapper(doc, false);
