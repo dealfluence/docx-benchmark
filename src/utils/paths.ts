@@ -15,3 +15,15 @@ export function getGoldenDocxPath(): string {
   }
   throw new Error("Could not locate golden.docx in any candidate paths");
 }
+
+export function getTempDirPath(): string {
+  return path.resolve("./temp");
+}
+
+export function clearTempDirectory(): void {
+  const tempDir = getTempDirPath();
+  if (fs.existsSync(tempDir)) {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+  fs.mkdirSync(tempDir, { recursive: true });
+}

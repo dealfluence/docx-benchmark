@@ -52,6 +52,7 @@ tsconfig.tsbuildinfo
 
 # Temporary files and results JSON
 temp_*
+/temp/
 /results/
 /live_benchmark_results.json
 /live_benchmark_results.md

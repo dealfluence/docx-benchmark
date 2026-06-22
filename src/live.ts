@@ -6,7 +6,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { DocumentObject } from "@adeu/core";
 import dotenv from "dotenv";
 
-import { getGoldenDocxPath } from "./utils/paths.js";
+import { getGoldenDocxPath, clearTempDirectory } from "./utils/paths.js";
 import { scenarios } from "./scenarios.js";
 import { evaluateTrial, TrialEvaluation } from "./fidelity.js";
 
@@ -59,6 +59,7 @@ export { runUnifiedAgenticLoop, runSafeDocxLoop, runAdeuLoop } from "./loops.js"
 export { printLiveConsoleSummary, writeLiveResultsFiles } from "./reporting.js";
 
 export async function runLiveBenchmark() {
+  clearTempDirectory();
   const docPath = getGoldenDocxPath();
   const dirPath = path.dirname(docPath);
   const largeDocPath = path.resolve(dirPath, "golden_large.docx");

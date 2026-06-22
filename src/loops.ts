@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DocumentObject } from "@adeu/core";
 import { checkScenarioSuccess } from "./success.js";
+import { getTempDirPath } from "./utils/paths.js";
 import {
   withTimeout,
   cleanSchema,
@@ -357,7 +358,11 @@ export async function runSafeDocxLoop(
   scenarioId: string,
   taskDescription: string,
 ): Promise<LoopResult> {
-  const tempFilePath = path.resolve(`./temp_safe_docx_rep_${performance.now()}.docx`);
+  const tempDir = getTempDirPath();
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+  const tempFilePath = path.join(tempDir, `temp_safe_docx_rep_${performance.now()}.docx`);
   fs.copyFileSync(docPath, tempFilePath);
 
   const { mcpClient, tools: mcpTools } = await connectMcpClient(
@@ -417,7 +422,11 @@ export async function runAdeuLoop(
   scenarioId: string,
   taskDescription: string,
 ): Promise<LoopResult> {
-  const tempFilePath = path.resolve(`./temp_adeu_rep_${performance.now()}.docx`);
+  const tempDir = getTempDirPath();
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+  const tempFilePath = path.join(tempDir, `temp_adeu_rep_${performance.now()}.docx`);
   fs.writeFileSync(tempFilePath, docBuffer);
 
   const { mcpClient, tools: mcpTools } = await connectMcpClient(
