@@ -1,0 +1,9 @@
+Document Name: post-money-safe.docx
+Source: Y Combinator Document Repository (https://www.ycombinator.com/documents)
+Licensing Framework: Creative Commons Attribution-NoDerivatives 4.0 International (CC BY-ND 4.0)
+License Details:
+You are free to share (copy and redistribute the material in any medium or format) for any purpose, even commercially, under the following terms:
+- Attribution: You must give appropriate credit, provide a link to the license, and indicate if changes were made.
+- NoDerivatives: If you remix, transform, or build upon the material, you may not distribute the modified material.
+- Note: This document is used purely as an authentic benchmark/test fixture for OOXML document processing.
+Full License Text: https://creativecommons.org/licenses/by-nd/4.0/

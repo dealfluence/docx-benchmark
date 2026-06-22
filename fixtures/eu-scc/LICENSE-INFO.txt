@@ -1,0 +1,8 @@
+Document Name: standard-contractual-clauses.docx
+Source: European Commission standard modular Standard Contractual Clauses (https://commission.europa.eu/law/law-topic/data-protection/international-dimension-data-transfers/standard-contractual-clauses-scc_en)
+Licensing Framework: European Commission Reuse Policy (implemented by Commission Decision 2011/833/EU) / Creative Commons Attribution 4.0 International (CC BY 4.0) equivalent.
+License Details:
+The reuse of European Commission documents is allowed for commercial and non-commercial purposes, free of charge, provided that:
+- The source of the documents is acknowledged.
+- The reuse does not distort the original meaning or message of the documents.
+Full License Details: https://ec.europa.eu/info/legal-notice_en#reuse-policy

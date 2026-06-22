@@ -1,0 +1,11 @@
+Document Name: model-services-contract.docx
+Source: UK Government Cabinet Office official page for the "Model Services Contract" templates (https://www.gov.uk/government/publications/model-services-contract)
+Licensing Framework: Open Government Licence v3.0 (OGL v3.0) / Crown Copyright
+License Details:
+You are encouraged to use and re-use the Information that is available under this licence freely and flexibly, with only a few conditions.
+You are free to:
+- Copy, publish, distribute and transmit the Information;
+- Adapt the Information;
+- Exploit the Information commercially and non-commercially.
+You must, where you do any of the above, attribute the source of the Information by including an attribution statement.
+Full License Text: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
