@@ -33,7 +33,7 @@ export interface LiveTrialSummary {
   model: string;
   scenarioId: string;
   scenarioName: string;
-  paradigm: "raw-xml" | "markdown-roundtrip" | "adeu" | "safe-docx";
+  paradigm: "adeu" | "safe-docx";
   docSize: "small" | "large";
   supported: boolean;
   reps: number;
@@ -149,7 +149,8 @@ export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: numbe
     "\n\n";
 
   md += `## Comparative Metrics\n\n`;
-  md += `> [Spacer alert note showing conditions of token savings]\n`;
+  md += `> [!NOTE]\n`;
+  md += `> This benchmark contains **no one-shot** workflows. It exclusively measures multi-turn, agentic round-trip workflows.\n\n`;
   md += `> [!IMPORTANT]\n`;
   md += `> Token savings only matter when **Success Rate** is high. A paradigm that achieves low token counts but consistently fails tasks or corrupts document styling has zero utility.\n\n`;
 

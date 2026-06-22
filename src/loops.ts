@@ -306,7 +306,13 @@ export function bindArgsToTempPath(
   tempFilePath: string,
 ): Record<string, unknown> {
   const cleanArgs = { ...args };
-  for (const key of ["file_path", "path", "save_to_local_path", "original_docx_path", "output_path"]) {
+  for (const key of [
+    "file_path",
+    "path",
+    "save_to_local_path",
+    "original_docx_path",
+    "output_path",
+  ]) {
     if (key in properties) {
       cleanArgs[key] = tempFilePath;
     }

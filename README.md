@@ -1,8 +1,11 @@
 # Document Redlining & Processing Benchmark
 
-Benchmarking suite designed to measure the efficiency, token consumption, and formatting fidelity of differing patterns for processing Microsoft Word (`.docx`) documents in LLM-driven workflows.
+Benchmarking suite designed to measure the efficiency, token consumption, and formatting fidelity of agentic patterns for processing Microsoft Word (`.docx`) documents in LLM-driven workflows.
 
-This suite compares **Adeu** (a surgical XML patcher / Virtual DOM) against **Safe Docx** (`@usejunior/safe-docx`), alongside two standard alternative paradigms: **Raw XML (Flat OPC) manipulation** and **Naïve Markdown Round-tripping**.
+> [!NOTE]
+> This benchmark contains **no one-shot** workflows. It strictly evaluates and compares multi-turn, agentic round-trip workflows.
+
+This suite compares **Adeu** (agentic loop executing over `@adeu/mcp-server`) against **Safe Docx** (`@usejunior/safe-docx` agentic loop).
 
 Detailed design choices, cost formulas, and scoring rules are documented in the [METHODOLOGY.md](METHODOLOGY.md) file.
 

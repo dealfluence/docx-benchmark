@@ -6,12 +6,13 @@ This document serves as the long-term context file for developers and AI agents 
 
 ## 1. Core Architecture & Paradigms
 
-The benchmark measures and compares four document-editing paradigms on equal terms (same model, temperature, reps, and tokenizer settings):
+> [!NOTE]
+> This benchmark focuses exclusively on multi-turn, agentic round-trip workflows. There are **no one-shot** workflows included in the suite.
 
-1. **`raw-xml`**: Provides the LLM with raw `word/document.xml`. Steelmanned to allow either full XML emission or surgical `SEARCH/REPLACE` blocks.
-2. **`markdown-roundtrip`**: Projects the document to plain Markdown, receives edited Markdown, and regenerates a `.docx` document.
-3. **`adeu`**: Projects the document to CriticMarkup and applies a structured JSON array of surgical `DocumentChange` instructions using `@adeu/core`'s `RedlineEngine`. For complex scenarios, executes a multi-turn tool-calling loop over `@adeu/mcp-server` via standard stdio transport.
-4. **`safe-docx`**: Executes a stateful, multi-turn tool-calling loop against the `@usejunior/safe-docx` MCP server over stdio transport.
+The benchmark measures and compares two agentic document-editing paradigms on equal terms (same model, temperature, reps, and tokenizer settings) over standard stdio transport:
+
+1. **`adeu`**: Projects the document to CriticMarkup and applies structured modification instructions using a multi-turn tool-calling loop against the `@adeu/mcp-server`.
+2. **`safe-docx`**: Executes a stateful, multi-turn tool-calling loop against the `@usejunior/safe-docx` MCP server.
 
 ---
 
@@ -65,3 +66,7 @@ Multi-turn agent executions must report intermediate steps as single-line struct
 When designing tool schemas with complex nesting (such as arrays of object unions):
 *   **Schema Enforcement**: APIs must strictly enforce leaf-level properties when possible, as LLMs frequently fallback to stringifying JSON within arrays (double-serialization).
 *   **Defensive Parsing**: Downstream MCP tools or executors should implement defensive parsing to gracefully handle stringified JSON array parameters and prevent immediate runtime failures.
+
+### 3.6 Automated Pre-Commit Safety & Cross-Platform Integrity
+*   **Continuous Quality Guard (Husky)**: A pre-commit hook runs automated code formatting (`prettier`), linting (`eslint`), and type verification (`tsc --noEmit`) before any commit is accepted, preventing syntax or structural regressions from entering the branch.
+*   **Deterministic Line Endings (`.gitattributes`)**: A workspace-wide Git attributes configuration forces LF (Unix) line endings for code, markdown, and configuration files. This eliminates line-ending conflicts across development environments while explicitly identifying `.docx` packages as binary files.

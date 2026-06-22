@@ -190,55 +190,6 @@ export function evaluateFidelity(
 }
 
 /**
- * Simulates a Markdown round-trip by stripping headers, footers, comments, custom styles,
- * and tracked changes, and writing raw text paragraphs into a new DocumentObject structure.
- */
-export async function createStrippedDoc(
-  originalBuffer: Buffer,
-  newText: string,
-): Promise<DocumentObject> {
-  const docCopy = await DocumentObject.load(originalBuffer);
-
-  // Strip headers, footers, comments from package parts array
-  docCopy.pkg.parts = docCopy.pkg.parts.filter((p) => {
-    const name = p.partname.toLowerCase();
-    return !name.includes("header") && !name.includes("footer") && !name.includes("comments");
-  });
-
-  // Strip references from document relations
-  const docPart = docCopy.part;
-  for (const [id, rel] of docPart.rels.entries()) {
-    const type = rel.type.toLowerCase();
-    if (type.includes("header") || type.includes("footer") || type.includes("comments")) {
-      docPart.rels.delete(id);
-    }
-  }
-
-  const parser = new DOMParser();
-
-  // Replace word/styles.xml with empty styles container to represent formatting loss
-  const stylesPart = docCopy.pkg.parts.find((p) => p.partname.endsWith("styles.xml"));
-  if (stylesPart) {
-    const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"></w:styles>`;
-    stylesPart.blob = stylesXml;
-    const parsedStyles = parser.parseFromString(stylesXml, "text/xml");
-    stylesPart._element = parsedStyles.documentElement as unknown as Element;
-  }
-
-  // Inject reconstructed unstyled body paragraphs
-  const paragraphXmls = newText.split("\n\n").map((para) => {
-    const cleanPara = para.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return `<w:p><w:r><w:t>${cleanPara}</w:t></w:r></w:p>`;
-  });
-  const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paragraphXmls.join("")}</w:body></w:document>`;
-  docCopy.part.blob = docXml;
-  const parsedDoc = parser.parseFromString(docXml, "text/xml");
-  docCopy.part._element = parsedDoc.documentElement as unknown as Element;
-
-  return docCopy;
-}
-
-/**
  * Calculates the edit distance delta between original and modified XML strings by tag boundaries.
  */
 export function calculateXmlDelta(originalXml: string, modifiedXml: string): number {

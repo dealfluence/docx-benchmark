@@ -2,12 +2,13 @@
 
 ## 1. Core Paradigms Compared
 
-The suite measures four programmatic editing strategies:
+> [!NOTE]
+> This benchmark focuses exclusively on multi-turn, agentic round-trip workflows. There are **no one-shot** workflows measured.
 
-1. **`raw-xml`**: The model is provided with the raw XML of the main document part (`word/document.xml`) along with system instructions to perform the edit. The model returns either the edited XML body or targeted search/replace patches which are then merged.
-2. **`markdown-roundtrip`**: The Word document is projected into plain Markdown text (`DocumentMapper(doc, true)`). The model receives and edits the Markdown, and the document is then reconstructed back into `.docx` format using document-building primitives.
-3. **`adeu`**: The Word document is projected into CriticMarkup (`DocumentMapper(doc, false)`). The model receives this markup and outputs a structured JSON array of surgical `DocumentChange` instructions (e.g., `modify`, `accept`, `reject`, `reply`). These instructions are applied directly to the document using `@adeu/core`'s `RedlineEngine`.
-4. **`safe-docx`**: A real-world agentic tool using the Model Context Protocol (MCP) tool-calling standard. The model executes a multi-turn tool-calling loop against `@usejunior/safe-docx` (Apache-2.0) to inspect, edit, and save the document. We report both the total all-in token cost and a floor representing genuinely new content tokens (excluding tool definitions and prior turn history) to distinguish paradigm overhead from raw document-handling capacity.
+The suite measures two agentic programmatic editing strategies:
+
+1. **`adeu`**: For complex agentic scenarios, executes a multi-turn tool-calling loop over `@adeu/mcp-server` via standard stdio transport, applying a structured JSON array of surgical modifications.
+2. **`safe-docx`**: A real-world agentic tool using the Model Context Protocol (MCP) tool-calling standard. The model executes a multi-turn tool-calling loop against `@usejunior/safe-docx` (Apache-2.0) to inspect, edit, and save the document. We report both the total all-in token cost and a floor representing genuinely new content tokens (excluding tool definitions and prior turn history) to distinguish paradigm overhead from raw document-handling capacity.
 
 ## 2. Metric Definitions
 

@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
+    "prepare": "husky",
     "benchmark": "tsc && node dist/live.js",
     "benchmark:quick": "tsc && node dist/live.js --quick"
   },
@@ -35,6 +36,7 @@
     "@typescript-eslint/eslint-plugin": "^8.61.1",
     "@typescript-eslint/parser": "^8.61.1",
     "eslint": "^10.5.0",
+    "husky": "latest",
     "prettier": "^3.8.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"

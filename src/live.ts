@@ -1,39 +1,14 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { DocumentObject, DocumentMapper, RedlineEngine } from "@adeu/core";
+import { DocumentObject } from "@adeu/core";
 import dotenv from "dotenv";
 
 import { getGoldenDocxPath } from "./utils/paths.js";
 import { scenarios } from "./scenarios.js";
-import {
-  evaluateTrial,
-  createStrippedDoc,
-  createXmlReconstructedDoc,
-  TrialEvaluation,
-} from "./fidelity.js";
-
-export const XML_SYSTEM_PROMPT = `You are an expert contract editor. You are provided with the XML content of the main document part of a Microsoft Word file.
-Analyze the XML structure and perform the requested edit.
-
-To perform the edit, you can use either of these two formats:
-
-1. SEARCH/REPLACE BLOCK FORMAT (Highly Recommended for surgical edits):
-Output one or more search/replace blocks specifying exactly which lines of XML to modify. This preserves unmodified XML perfectly.
-Format:
-<<<<<<< SEARCH
-[Exact XML lines from the original document to find]
-=======
-[New XML lines to replace the search block]
->>>>>>> REPLACE
-
-2. FULL XML FORMAT:
-If the change is extremely complex or touches almost every part, output the entire updated XML document.
-
-Ensure you maintain valid XML syntax, well-formed tags, and preserve existing namespaces and styles.`;
+import { evaluateTrial, TrialEvaluation } from "./fidelity.js";
 
 export const ADEU_SYSTEM_PROMPT = `You are an expert contract editor. You are provided with the document in Markdown with track changes represented as CriticMarkup (e.g. {++insert++}, {--delete--}).
 Perform the requested edits and output a JSON array of DocumentChange objects representing only the surgical modifications or review actions to be applied.
@@ -43,8 +18,6 @@ Supported operations:
 - { "type": "reject", "target_id": string }
 - { "type": "reply", "target_id": string, "text": string }`;
 
-import { withTimeout, AdeuOutputSchema, GEMINI_TIMEOUT_MS } from "./utils/gemini.js";
-import { validateXmlSyntax, applyXmlSearchReplace, cleanJsonResponse } from "./utils/xml.js";
 import { runSafeDocxLoop, runAdeuLoop } from "./loops.js";
 import {
   getStats,
@@ -76,99 +49,14 @@ let reps = getFlagReps() ?? getEnvReps() ?? (isQuick ? 1 : 5);
 // Model names config
 const geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash";
 
-// System prompts for each paradigm
-export const MD_LIVE_SYSTEM_PROMPT = `You are an expert contract editor. You are provided with the document content in Markdown format.
-Perform the requested edits and return the ENTIRE updated Markdown document. Do not truncate the document, as it must be completely round-tripped back to DOCX.
-Ensure your response contains ONLY the Markdown text. Do not wrap it in any explanation.`;
-
-// Backwards compatible exports redirecting consumers to correct modules
 export {
   withTimeout,
-  DocumentChangeSchema,
-  AdeuOutputSchema,
-  cleanSchema,
-  mapSchemaType,
   GEMINI_TIMEOUT_MS,
   MCP_CONNECT_TIMEOUT_MS,
   MCP_TOOL_TIMEOUT_MS,
 } from "./utils/gemini.js";
-export { validateXmlSyntax, applyXmlSearchReplace, cleanJsonResponse } from "./utils/xml.js";
 export { runUnifiedAgenticLoop, runSafeDocxLoop, runAdeuLoop } from "./loops.js";
 export { printLiveConsoleSummary, writeLiveResultsFiles } from "./reporting.js";
-
-export interface OneShotResult {
-  tokensIn: number;
-  tokensOut: number;
-  finalDoc: DocumentObject | null;
-}
-
-export async function runOneShot(
-  paradigm: "raw-xml" | "markdown-roundtrip" | "adeu",
-  scenario: any,
-  buffer: Buffer,
-  client: GoogleGenerativeAI,
-  model: string,
-): Promise<OneShotResult> {
-  const doc = await DocumentObject.load(buffer);
-  const isRawXml = paradigm === "raw-xml";
-  const isMd = paradigm === "markdown-roundtrip";
-  const systemPrompt = isRawXml
-    ? XML_SYSTEM_PROMPT
-    : isMd
-      ? MD_LIVE_SYSTEM_PROMPT
-      : ADEU_SYSTEM_PROMPT;
-  const documentContent = isRawXml ? doc.part.blob : new DocumentMapper(doc, isMd).full_text;
-  const userInstruction =
-    isRawXml || isMd
-      ? `Please update the document text according to these instructions:\nTarget Text to find: "${scenario.targetText}"\nReplacement Text to insert: "${scenario.replacementText}"`
-      : `Generate a JSON array of DocumentChange objects representing the required change.\nTarget Text: "${scenario.targetText}"\nReplacement Text: "${scenario.replacementText}"\nReview Action: ${scenario.reviewAction ? JSON.stringify(scenario.reviewAction) : "none"}`;
-
-  const fullUserMessage = `Here is the document context:\n=== DOCUMENT START ===\n${documentContent}\n=== DOCUMENT END ===\n\nTask:\n${userInstruction}`;
-
-  const modelInstance = client.getGenerativeModel(
-    {
-      model,
-      generationConfig: { temperature: 0.0 },
-    },
-    { timeout: GEMINI_TIMEOUT_MS },
-  );
-  const geminiResponse = await withTimeout(
-    modelInstance.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: `System Instructions:\n${systemPrompt}\n\n${fullUserMessage}` }],
-        },
-      ],
-    }),
-    GEMINI_TIMEOUT_MS,
-    `Gemini API call timed out after ${GEMINI_TIMEOUT_MS}ms`,
-  );
-  const rawOutput = geminiResponse.response.text() || "";
-  const tokensIn = geminiResponse.response.usageMetadata?.promptTokenCount || 0;
-  const tokensOut = geminiResponse.response.usageMetadata?.candidatesTokenCount || 0;
-
-  let finalDoc: DocumentObject | null = null;
-  if (paradigm === "raw-xml") {
-    const appliedXml = applyXmlSearchReplace(doc.part.blob, rawOutput);
-    if (validateXmlSyntax(appliedXml)) {
-      finalDoc = await createXmlReconstructedDoc(buffer, appliedXml);
-    }
-  } else if (paradigm === "markdown-roundtrip") {
-    finalDoc = await createStrippedDoc(buffer, rawOutput);
-  } else {
-    const cleanJson = cleanJsonResponse(rawOutput);
-    const validated = AdeuOutputSchema.safeParse(JSON.parse(cleanJson));
-    if (!validated.success) {
-      throw new Error(`JSON failed Adeu schema validation: ${validated.error.message}`);
-    }
-    const engine = new RedlineEngine(doc);
-    engine.process_batch(validated.data);
-    finalDoc = doc;
-  }
-
-  return { tokensIn, tokensOut, finalDoc };
-}
 
 export async function runLiveBenchmark() {
   const docPath = getGoldenDocxPath();
@@ -216,12 +104,7 @@ export async function runLiveBenchmark() {
         : scenarios;
 
       for (const scenario of activeScenarios) {
-        const paradigms: ("raw-xml" | "markdown-roundtrip" | "adeu" | "safe-docx")[] = [
-          "raw-xml",
-          "markdown-roundtrip",
-          "adeu",
-          "safe-docx",
-        ];
+        const paradigms: ("adeu" | "safe-docx")[] = ["adeu", "safe-docx"];
 
         for (const paradigm of paradigms) {
           console.log(
@@ -296,18 +179,6 @@ export async function runLiveBenchmark() {
                 if (loopRes.finalBuffer) {
                   finalDoc = await DocumentObject.load(loopRes.finalBuffer);
                 }
-              } else {
-                const res = await runOneShot(
-                  paradigm as "raw-xml" | "markdown-roundtrip" | "adeu",
-                  scenario,
-                  buffer,
-                  client as GoogleGenerativeAI,
-                  model,
-                );
-                tokensIn = res.tokensIn;
-                tokensOut = res.tokensOut;
-                roundTrips = 1;
-                finalDoc = res.finalDoc;
               }
 
               if (finalDoc) {
