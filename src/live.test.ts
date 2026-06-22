@@ -143,91 +143,73 @@ describe("F6 Guard Test: Success Discriminates", () => {
     const buffer = fs.readFileSync(docPath);
     const originalDoc = await DocumentObject.load(buffer);
 
-    // 1. surgical-correction
-    const passSurg = await createStrippedDoc(
+    // 1. form-fill
+    const passForm = await createStrippedDoc(
       buffer,
-      "This agreement is by and between NordicGlobal and the Customer.",
+      "This Safe certifies that Acme Corporate Technologies, Inc. issues to Jane Founder of 15,000,000.",
     );
-    const failSurg = await createStrippedDoc(
+    const failForm = await createStrippedDoc(
       buffer,
-      "This agreement is by and between NordicTech and the Customer.",
+      "This Safe certifies that [Company Name] of 15,000,000.",
     );
-    expect(checkScenarioSuccess("surgical-correction", originalDoc, passSurg)).toBe(true);
-    expect(checkScenarioSuccess("surgical-correction", originalDoc, failSurg)).toBe(false);
+    expect(await checkScenarioSuccess("form-fill", originalDoc, passForm)).toBe(true);
+    expect(await checkScenarioSuccess("form-fill", originalDoc, failForm)).toBe(false);
 
-    // 2. clause-drafting
-    const passDraft = await createStrippedDoc(
+    // 2. party-swap
+    const passParty = await createStrippedDoc(
       buffer,
-      "## 8.4 Data Protection\nEach party shall comply with all applicable data protection laws",
+      "Wayne Enterprises agrees to pay Bruce Wayne the sum.",
     );
-    const failDraft = await createStrippedDoc(buffer, "Some other text");
-    expect(checkScenarioSuccess("clause-drafting", originalDoc, passDraft)).toBe(true);
-    expect(checkScenarioSuccess("clause-drafting", originalDoc, failDraft)).toBe(false);
-
-    // 3. negotiation-cleanup (checks CriticMarkup)
-    const passNegotiation = await createStrippedDoc(buffer, "No changes left");
-    // original doc has Chg:2, so check on originalDoc should be false
-    expect(checkScenarioSuccess("negotiation-cleanup", originalDoc, passNegotiation)).toBe(true);
-    expect(checkScenarioSuccess("negotiation-cleanup", originalDoc, originalDoc)).toBe(false);
-
-    // 4. bulk-rewrite
-    const passBulk = await createStrippedDoc(
+    const failParty = await createStrippedDoc(
       buffer,
-      "Late payments shall accrue interest at the rate of 1.0%",
+      "This is dated as of and is between [COMPANY NAME] and [PURCHASER NAME].",
     );
-    const failBulk = await createStrippedDoc(buffer, "accrue late interest at the rate of 1.5%");
-    expect(checkScenarioSuccess("bulk-rewrite", originalDoc, passBulk)).toBe(true);
-    expect(checkScenarioSuccess("bulk-rewrite", originalDoc, failBulk)).toBe(false);
+    expect(await checkScenarioSuccess("party-swap", originalDoc, passParty)).toBe(true);
+    expect(await checkScenarioSuccess("party-swap", originalDoc, failParty)).toBe(false);
 
-    // 5. whole-document-restyle
-    const passRestyle = await createStrippedDoc(buffer, "GOVERNING LAW");
-    const failRestyle = await createStrippedDoc(buffer, "Governing Law");
-    expect(checkScenarioSuccess("whole-document-restyle", originalDoc, passRestyle)).toBe(true);
-    expect(checkScenarioSuccess("whole-document-restyle", originalDoc, failRestyle)).toBe(false);
-
-    // 6. no-op
-    expect(checkScenarioSuccess("no-op", originalDoc, originalDoc)).toBe(true);
-    const failNoOp = await createStrippedDoc(buffer, "ShouldNotBeInserted");
-    expect(checkScenarioSuccess("no-op", originalDoc, failNoOp)).toBe(false);
-
-    // 7. conditional-edit
-    const passCond = await createStrippedDoc(
+    // 3. policy-checklist-review
+    const passPolicy = await createStrippedDoc(
       buffer,
-      "Governing law is California. The parties irrevocably submit to the jurisdiction of California courts.",
+      `Checklist review results: { "governingLaw": "Delaware state laws", "liabilityCap": "General Cap", "standardTermsLink": "https://commonpaper.com/standards" }`,
     );
-    const failCond = await createStrippedDoc(
+    const failPolicy = await createStrippedDoc(
       buffer,
-      "Governing law is Germany. Disputes resolved by arbitration.",
+      `Checklist review results: { "someKey": "value" }`,
     );
-    expect(checkScenarioSuccess("conditional-edit", originalDoc, passCond)).toBe(true);
-    expect(checkScenarioSuccess("conditional-edit", originalDoc, failCond)).toBe(false);
+    expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, passPolicy)).toBe(true);
+    expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, failPolicy)).toBe(false);
 
-    // 8. dependent-multi-target
-    const passDep = await createStrippedDoc(
-      buffer,
-      "2.2 feedback 2.3 customer data 2.4 data usage rights notwithstanding section 2.3",
-    );
-    const failDep = await createStrippedDoc(buffer, "feedback but no renumbering");
-    expect(checkScenarioSuccess("dependent-multi-target", originalDoc, passDep)).toBe(true);
-    expect(checkScenarioSuccess("dependent-multi-target", originalDoc, failDep)).toBe(false);
+    // 4. playbook-commenting
+    const passComment = await createStrippedDoc(buffer, "Plain text document content");
+    passComment.pkg.parts.push({
+      partname: "word/comments.xml",
+      blob: `<?xml version="1.0" encoding="UTF-8"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:comment w:id="1"><w:p><w:r><w:t>Late payment interest rate should be 1.0%.</w:t></w:r></w:p></w:comment></w:comments>`,
+    } as any);
+    const failComment = await createStrippedDoc(buffer, "Plain text document content");
+    expect(await checkScenarioSuccess("playbook-commenting", originalDoc, passComment)).toBe(true);
+    expect(await checkScenarioSuccess("playbook-commenting", originalDoc, failComment)).toBe(false);
 
-    // 9. selective-verify-and-repair
-    const passSelective = await createStrippedDoc(
-      buffer,
-      "{++Esko Aho++}{>>[Chg:8 insert] Mikko<<}",
-    );
-    expect(checkScenarioSuccess("selective-verify-and-repair", originalDoc, passSelective)).toBe(
-      true,
-    );
-    expect(checkScenarioSuccess("selective-verify-and-repair", originalDoc, originalDoc)).toBe(
-      false,
-    );
+    // 5. multi-file-assembly
+    const tempFilePath = "./temp_test_live_scenario5.docx";
+    const tempDpaPath = "./temp_test_live_scenario5_dpa.docx";
+    
+    // Create temporary DPA mock file
+    const dpaDoc = await createStrippedDoc(buffer, "Wayne Enterprises and June 22, 2026 dpa details");
+    const dpaExport = await dpaDoc.save();
+    fs.writeFileSync(tempDpaPath, dpaExport);
 
-    // 10. search-then-compute
-    const passSearchComp = await createStrippedDoc(buffer, "interest rate is 0.75%");
-    const failSearchComp = await createStrippedDoc(buffer, "interest rate is 1.5%");
-    expect(checkScenarioSuccess("search-then-compute", originalDoc, passSearchComp)).toBe(true);
-    expect(checkScenarioSuccess("search-then-compute", originalDoc, failSearchComp)).toBe(false);
+    const passCsa = await createStrippedDoc(buffer, "Wayne Enterprises and June 22, 2026 csa details");
+
+    try {
+      expect(await checkScenarioSuccess("multi-file-assembly", originalDoc, passCsa, tempFilePath)).toBe(true);
+      
+      const failCsa = await createStrippedDoc(buffer, "Missing Wayne details");
+      expect(await checkScenarioSuccess("multi-file-assembly", originalDoc, failCsa, tempFilePath)).toBe(false);
+    } finally {
+      if (fs.existsSync(tempDpaPath)) {
+        fs.unlinkSync(tempDpaPath);
+      }
+    }
   });
 });
 

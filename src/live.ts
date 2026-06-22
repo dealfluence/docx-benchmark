@@ -96,12 +96,11 @@ export async function runLiveBenchmark() {
       console.warn(`[WARNING] Document not found: ${currentDocPath}, skipping ${docSize} size.`);
       continue;
     }
-    const buffer = fs.readFileSync(currentDocPath);
 
     for (const clientWrapper of clients) {
       const { provider, client, model } = clientWrapper;
       const activeScenarios = isQuick
-        ? [scenarios[0], scenarios.find((s) => s.isAgentic) || scenarios[0]]
+        ? [scenarios[0]]
         : scenarios;
 
       for (const scenario of activeScenarios) {
@@ -117,7 +116,13 @@ export async function runLiveBenchmark() {
           for (let rep = 0; rep < reps; rep++) {
             process.stdout.write(`  Rep ${rep + 1}/${reps}... `);
 
-            const originalDoc = await DocumentObject.load(buffer);
+            const scenarioDocPath = path.resolve(scenario.fixturePath);
+            if (!fs.existsSync(scenarioDocPath)) {
+              console.error(`\n[ERROR] Fixture path not found: ${scenarioDocPath}`);
+              continue;
+            }
+            const scenarioBuffer = fs.readFileSync(scenarioDocPath);
+            const originalDoc = await DocumentObject.load(scenarioBuffer);
 
             const start = performance.now();
             let tokensIn = 0;
@@ -135,16 +140,18 @@ export async function runLiveBenchmark() {
             let newContentTokensVal = 0;
 
             let finalDoc: DocumentObject | null = null;
+            let loopResTempFilePath: string | undefined = undefined;
             try {
               if (paradigm === "safe-docx") {
                 const fullTaskDescription = getFullTaskDescription(scenario);
                 const loopRes = await runSafeDocxLoop(
                   client as GoogleGenerativeAI,
                   model,
-                  currentDocPath,
+                  scenarioDocPath,
                   scenario.id,
                   fullTaskDescription,
                 );
+                loopResTempFilePath = loopRes.tempFilePath;
                 tokensIn = loopRes.tokensIn;
                 tokensOut = loopRes.tokensOut;
                 roundTrips = loopRes.roundTrips;
@@ -163,10 +170,11 @@ export async function runLiveBenchmark() {
                 const loopRes = await runAdeuLoop(
                   client as GoogleGenerativeAI,
                   model,
-                  buffer,
+                  scenarioDocPath,
                   scenario.id,
                   fullTaskDescription,
                 );
+                loopResTempFilePath = loopRes.tempFilePath;
                 tokensIn = loopRes.tokensIn;
                 tokensOut = loopRes.tokensOut;
                 roundTrips = loopRes.roundTrips;
@@ -185,7 +193,12 @@ export async function runLiveBenchmark() {
               if (finalDoc) {
                 const exported = await finalDoc.save();
                 if (exported && exported.length > 0) {
-                  const evalResult = evaluateTrial(originalDoc, finalDoc, scenario.id);
+                  const evalResult = await evaluateTrial(
+                    originalDoc,
+                    finalDoc,
+                    scenario.id,
+                    loopResTempFilePath,
+                  );
                   success = evalResult.success;
                   fidelity = evalResult.fidelity;
                   xmlDelta = evalResult.xmlDelta;
@@ -194,6 +207,24 @@ export async function runLiveBenchmark() {
               }
             } catch (e: unknown) {
               apiError = e instanceof Error ? e.message : String(e);
+            } finally {
+              if (loopResTempFilePath) {
+                if (fs.existsSync(loopResTempFilePath)) {
+                  try {
+                    fs.unlinkSync(loopResTempFilePath);
+                  } catch {
+                    // ignore
+                  }
+                }
+                const companionDpaPath = loopResTempFilePath.replace(".docx", "_dpa.docx");
+                if (fs.existsSync(companionDpaPath)) {
+                  try {
+                    fs.unlinkSync(companionDpaPath);
+                  } catch {
+                    // ignore
+                  }
+                }
+              }
             }
 
             const latencyMs = performance.now() - start;

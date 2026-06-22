@@ -27,6 +27,7 @@ export interface LoopResult {
   schemaTokens?: number;
   historyTokens?: number;
   newContentTokens?: number;
+  tempFilePath?: string;
 }
 
 export interface UnifiedLoopConfig {
@@ -313,9 +314,17 @@ export function bindArgsToTempPath(
     "save_to_local_path",
     "original_docx_path",
     "output_path",
+    "docx_path",
+    "original_path",
+    "modified_path",
   ]) {
     if (key in properties) {
-      cleanArgs[key] = tempFilePath;
+      const origValue = String(args[key] || "");
+      if (origValue.toLowerCase().includes("dpa")) {
+        cleanArgs[key] = tempFilePath.replace(".docx", "_dpa.docx");
+      } else {
+        cleanArgs[key] = tempFilePath;
+      }
     }
   }
   return cleanArgs;
@@ -343,7 +352,11 @@ export function makeMcpToolExecutor(
     if (options.forceSaveOverwrite && name === "save") {
       cleanArgs.allow_overwrite = true;
     }
-    const toolResult = await mcpClient.callTool({ name, arguments: cleanArgs });
+    const toolResult = await withTimeout(
+      mcpClient.callTool({ name, arguments: cleanArgs }),
+      MCP_TOOL_TIMEOUT_MS,
+      `MCP tool call to '${name}' on client '${options.clientName}' timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
+    );
     return {
       result: { result: (toolResult as McpToolResult).content },
       hadError: !isMcpToolSuccess(toolResult as McpToolResult),
@@ -364,6 +377,15 @@ export async function runSafeDocxLoop(
   }
   const tempFilePath = path.join(tempDir, `temp_safe_docx_rep_${performance.now()}.docx`);
   fs.copyFileSync(docPath, tempFilePath);
+
+  let tempDpaPath: string | undefined = undefined;
+  if (scenarioId === "multi-file-assembly") {
+    tempDpaPath = tempFilePath.replace(".docx", "_dpa.docx");
+    const dpaSourcePath = path.resolve(path.dirname(docPath), "dpa-module.docx");
+    if (fs.existsSync(dpaSourcePath)) {
+      fs.copyFileSync(dpaSourcePath, tempDpaPath);
+    }
+  }
 
   const { mcpClient, tools: mcpTools } = await connectMcpClient(
     "@usejunior/safe-docx",
@@ -387,7 +409,7 @@ Do not re-read the entire document after editing unless strictly necessary. Do n
 
   const originalDoc = await DocumentObject.load(fs.readFileSync(docPath));
 
-  return runUnifiedAgenticLoop({
+  const result = await runUnifiedAgenticLoop({
     gemini,
     modelName,
     systemPrompt,
@@ -401,24 +423,23 @@ Do not re-read the entire document after editing unless strictly necessary. Do n
     checkSuccess: async () => {
       const currentBuffer = fs.readFileSync(tempFilePath);
       const currentDoc = await DocumentObject.load(currentBuffer);
-      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc);
+      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc, tempFilePath);
     },
     getFinalBuffer: async () => {
       return fs.existsSync(tempFilePath) ? fs.readFileSync(tempFilePath) : fs.readFileSync(docPath);
     },
     cleanup: async () => {
       await mcpClient.close();
-      if (fs.existsSync(tempFilePath)) {
-        fs.unlinkSync(tempFilePath);
-      }
     },
   });
+
+  return { ...result, tempFilePath };
 }
 
 export async function runAdeuLoop(
   gemini: GoogleGenerativeAI,
   modelName: string,
-  docBuffer: Buffer,
+  docPath: string,
   scenarioId: string,
   taskDescription: string,
 ): Promise<LoopResult> {
@@ -427,7 +448,17 @@ export async function runAdeuLoop(
     fs.mkdirSync(tempDir, { recursive: true });
   }
   const tempFilePath = path.join(tempDir, `temp_adeu_rep_${performance.now()}.docx`);
+  const docBuffer = fs.readFileSync(docPath);
   fs.writeFileSync(tempFilePath, docBuffer);
+
+  let tempDpaPath: string | undefined = undefined;
+  if (scenarioId === "multi-file-assembly") {
+    tempDpaPath = tempFilePath.replace(".docx", "_dpa.docx");
+    const dpaSourcePath = path.resolve(path.dirname(docPath), "dpa-module.docx");
+    if (fs.existsSync(dpaSourcePath)) {
+      fs.copyFileSync(dpaSourcePath, tempDpaPath);
+    }
+  }
 
   const { mcpClient, tools: mcpTools } = await connectMcpClient(
     "@adeu/mcp-server",
@@ -460,7 +491,7 @@ CRITICAL INSTRUCTIONS FOR STOPPING:
 
   const originalDoc = await DocumentObject.load(docBuffer);
 
-  return runUnifiedAgenticLoop({
+  const result = await runUnifiedAgenticLoop({
     gemini,
     modelName,
     systemPrompt,
@@ -474,16 +505,16 @@ CRITICAL INSTRUCTIONS FOR STOPPING:
     checkSuccess: async () => {
       const currentBuffer = fs.readFileSync(tempFilePath);
       const currentDoc = await DocumentObject.load(currentBuffer);
-      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc);
+      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc, tempFilePath);
     },
     getFinalBuffer: async () => {
       return fs.existsSync(tempFilePath) ? fs.readFileSync(tempFilePath) : docBuffer;
     },
     cleanup: async () => {
       await mcpClient.close();
-      if (fs.existsSync(tempFilePath)) {
-        fs.unlinkSync(tempFilePath);
-      }
     },
   });
+
+  return { ...result, tempFilePath };
 }
+

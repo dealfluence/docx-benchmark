@@ -21,11 +21,12 @@ export interface TrialEvaluation {
 /**
  * Standardized trial evaluation checking well-formed XML syntax, scenario success, and style fidelity.
  */
-export function evaluateTrial(
+export async function evaluateTrial(
   originalDoc: DocumentObject,
   finalDoc: DocumentObject,
   scenarioId: string,
-): TrialEvaluation {
+  tempFilePath?: string,
+): Promise<TrialEvaluation> {
   let xmlIntegrity: "PASS" | "FAIL" = "FAIL";
   try {
     const parser = new DOMParser({
@@ -41,7 +42,7 @@ export function evaluateTrial(
     xmlIntegrity = "FAIL";
   }
 
-  const success = checkScenarioSuccess(scenarioId, originalDoc, finalDoc);
+  const success = await checkScenarioSuccess(scenarioId, originalDoc, finalDoc, tempFilePath);
   const fidReport = evaluateFidelity(originalDoc, finalDoc, scenarioId);
 
   return {

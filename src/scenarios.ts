@@ -11,99 +11,53 @@ export interface Scenario {
     payload?: string;
   };
   isAgentic?: boolean;
+  fixturePath: string;
 }
 
 export const scenarios: Scenario[] = [
   {
-    id: "surgical-correction",
-    name: "Surgical Correction (Terminology Update)",
-    description:
-      "A contract where a corporate party name needs to be updated. Tests the capability to perform highly targeted search-and-replace edits.",
-    targetText: "NordicTech",
-    replacementText: "NordicGlobal",
-  },
-  {
-    id: "clause-drafting",
-    name: "Clause Drafting (Section Insertion)",
-    description:
-      "Inserting a structured data protection clause at the end of the General Provisions section. Measures formatting inheritance and layout consistency.",
-    targetText:
-      "8.3 Entire Agreement.\n\nThis Agreement is the entire agreement between Provider and Customer regarding Customer’s use of Services and supersedes all prior and contemporaneous agreements, proposals or representations, written or oral, concerning its subject matter.",
-    replacementText:
-      "8.3 Entire Agreement.\n\nThis Agreement is the entire agreement between Provider and Customer regarding Customer’s use of Services and supersedes all prior and contemporaneous agreements, proposals or representations, written or oral, concerning its subject matter.\n\n8.4 Data Protection.\n\nEach party shall comply with all applicable data protection laws.",
-  },
-  {
-    id: "negotiation-cleanup",
-    name: "Negotiation Cleanup (Track Changes Accept)",
-    description:
-      "Accepting an existing tracked revision in the document. Demonstrates whether the paradigm can cleanly execute review operations on native XML nodes.",
-    targetText: "",
-    replacementText: "",
-    reviewAction: {
-      type: "accept",
-      targetId: "Chg:2",
-    },
-  },
-  {
-    id: "bulk-rewrite",
-    name: "Bulk Rewrite (Clause/Section Replacement)",
-    description:
-      "Replacing an entire clause with a rewritten standard. Evaluates cost advantages of surgical patching vs full re-emission when block changes are larger.",
-    targetText:
-      "If any invoiced amount is not received by Provider by the due date, then without limiting Provider’s rights or remedies, those charges may accrue late interest at the rate of 1.5% of the outstanding balance per month, or the maximum rate permitted by law, whichever is lower.",
-    replacementText:
-      "Late payments shall accrue interest at the rate of 1.0% per month on any outstanding balance.",
-  },
-  {
-    id: "whole-document-restyle",
-    name: "Whole Document Restyle (Capitalization / Global Change)",
-    description:
-      "Capitalizing section titles globally throughout the contract to check formatting consistency on multiple targets.",
-    targetText: "Governing Law",
-    replacementText: "GOVERNING LAW",
-  },
-  {
-    id: "no-op",
-    name: "No-Op / Already Correct (Robustness Test)",
-    description:
-      "Instructing the model to edit a term that does not exist in the contract. Correct behavior is to perform zero modifications, verifying resistance to hallucination.",
-    targetText: "NonExistentWord",
-    replacementText: "ShouldNotBeInserted",
-  },
-  {
-    id: "conditional-edit",
-    name: "Conditional Clause Insertion (State Venue)",
-    description:
-      "Inspect the Governing Law and Venue clause in Section 8.1. If the governing law is California, append the sentence: 'The parties irrevocably submit to the jurisdiction of California courts.' If any other state, do nothing.",
+    id: "form-fill",
+    name: "Form Fill (SAFE Deal Data)",
+    description: "Locate bracketed placeholders or blank fields for 'Company Name', 'Investor Name'/'Founder Name', and 'Valuation Cap' in the Post-Money SAFE template and populate them with specific deal data: Company Name is 'Acme Corporate Technologies, Inc.', Investor Name is 'Jane Founder', and Valuation Cap is '$15,000,000'.",
     targetText: "",
     replacementText: "",
     isAgentic: true,
+    fixturePath: "fixtures/ycombinator/post-money-safe.docx",
   },
   {
-    id: "dependent-multi-target",
-    name: "Dependent Multi-Target (Section Renumbering)",
-    description:
-      "Insert a new Section 2.2 'Feedback' allowing Provider to use Customer suggestions. Renumber the subsequent sections in Article 2 (original 2.2 'Customer Data' becomes 2.3, and original 2.3 'Data Usage Rights' becomes 2.4). Also, update the cross-reference inside the newly-renumbered Section 2.4 to point to Section 2.3 instead of Section 2.2 (it currently says 'Notwithstanding Section 2.2').",
+    id: "party-swap",
+    name: "Contract Clone & Party Swap (Investment Agreement)",
+    description: "Globally swap contracting party details (change '[COMPANY NAME]' to 'Wayne Enterprises, Inc.' and '[PURCHASER NAME]' to 'Bruce Wayne') consistently throughout the Series Seed Investment Agreement, updating definitions and signature blocks.",
     targetText: "",
     replacementText: "",
     isAgentic: true,
+    fixturePath: "fixtures/series-seed/investment-agreement.docx",
   },
   {
-    id: "selective-verify-and-repair",
-    name: "Selective Verify and Repair (Indemnity Exemption)",
-    description:
-      "Accept all tracked changes in the document, EXCEPT those in Section 5.2 (Indemnification by Provider) which must remain intact as tracked changes.",
+    id: "policy-checklist-review",
+    name: "Policy Checklist Review (CSA Analysis)",
+    description: "Analyze the Cloud Service Agreement against a 3-point legal compliance checklist: (1) Governing Law, (2) Limitation of Liability cap, and (3) Standard Terms URL. Append the final results as a clean JSON review summary at the very end of the document using keys 'governingLaw', 'liabilityCap', and 'standardTermsLink'.",
     targetText: "",
     replacementText: "",
     isAgentic: true,
+    fixturePath: "fixtures/common-paper/cloud-service-agreement.docx",
   },
   {
-    id: "search-then-compute",
-    name: "Search-then-Compute (Halve Interest Rate)",
-    description:
-      "Find the late interest percentage rate in Section 3.3, halve the numeric value, and replace the old rate with the new halved value (from 1.5% to 0.75%).",
+    id: "playbook-commenting",
+    name: "Playbook-based Commenting (Late Payment Interest Cap)",
+    description: "Review the Cloud Service Agreement against a specific corporate playbook rule: 'Late payment interest cannot exceed 1.0% per month'. Locate the non-conforming late payment interest rate (which is currently 1.5% per month) and insert an OOXML margin comment anchored to that text run containing the playbook feedback.",
     targetText: "",
     replacementText: "",
     isAgentic: true,
+    fixturePath: "fixtures/common-paper/cloud-service-agreement.docx",
+  },
+  {
+    id: "multi-file-assembly",
+    name: "Multi-file Deal Assembly (Consistent CSA & DPA)",
+    description: "Ensure cross-document consistency by propagating a synchronized set of variables ('Wayne Enterprises, Inc.' as Customer Name, and 'June 22, 2026' as Effective Date) across both the Cloud Service Agreement (CSA) and the Data Processing Agreement (DPA) in a single transactional run.",
+    targetText: "",
+    replacementText: "",
+    isAgentic: true,
+    fixturePath: "fixtures/common-paper/cloud-service-agreement.docx",
   },
 ];
