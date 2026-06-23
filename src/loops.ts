@@ -126,29 +126,26 @@ export function cleanTempDirOnStartup() {
   }
 }
 
-export function logContents(prefix: string, contents: Content[]) {
-  logInfo(prefix, `=== Sending Conversation History (Total Messages: ${contents.length}) ===`);
-  contents.forEach((msg, idx) => {
-    logInfo(prefix, `  Message [${idx + 1}] Role: ${msg.role}`);
-    for (const part of msg.parts || []) {
-      if (part.text) {
-        logInfo(prefix, `    Text: "${part.text.trim()}"`);
-      } else if (part.functionCall) {
-        logInfo(
-          prefix,
-          `    Function Call: ${part.functionCall.name} with args ${JSON.stringify(part.functionCall.args)}`,
-        );
-      } else if (part.functionResponse) {
-        logInfo(
-          prefix,
-          `    Function Response [${part.functionResponse.name}]: ${JSON.stringify(part.functionResponse.response)}`,
-        );
-      } else {
-        logInfo(prefix, `    Part: ${JSON.stringify(part)}`);
-      }
+export function appendAndLog(prefix: string, contents: Content[], msg: Content) {
+  contents.push(msg);
+  logInfo(prefix, `--> Appending Conversation Turn | Role: ${msg.role}`);
+  for (const part of msg.parts || []) {
+    if (part.text) {
+      logInfo(prefix, `    Text: "${part.text.trim()}"`);
+    } else if (part.functionCall) {
+      logInfo(
+        prefix,
+        `    Function Call: ${part.functionCall.name} with args ${JSON.stringify(part.functionCall.args)}`,
+      );
+    } else if (part.functionResponse) {
+      logInfo(
+        prefix,
+        `    Function Response [${part.functionResponse.name}]: ${JSON.stringify(part.functionResponse.response)}`,
+      );
+    } else {
+      logInfo(prefix, `    Part: ${JSON.stringify(part)}`);
     }
-  });
-  logInfo(prefix, `======================================================`);
+  }
 }
 
 export const COMPLETE_TASK_TOOL: FunctionDeclaration = {
@@ -255,9 +252,6 @@ export async function executeTurn(
     logInfo(prefix, `Sending prompt content length: ${contents.length} messages.`);
   }
 
-  // Log exact conversation payload history
-  logContents(prefix, contents);
-
   logInfo(prefix, `Dispatching API call (timeout: ${GEMINI_TIMEOUT_MS}ms)...`);
   const geminiResponse = await generateContentWithRetry(
     config.gemini,
@@ -312,7 +306,7 @@ export async function executeTurn(
   }
 
   stats.roundTrips++;
-  contents.push({ role: "model", parts });
+  appendAndLog(prefix, contents, { role: "model", parts });
 
   const functionResponses: Array<{ name: string; response: Record<string, unknown> }> = [];
   const turnStart = performance.now();
@@ -330,7 +324,7 @@ export async function executeTurn(
     config.loopName,
   );
 
-  contents.push({
+  appendAndLog(prefix, contents, {
     role: "user",
     parts: functionResponses.map((fr) => ({ functionResponse: fr })),
   });
@@ -346,14 +340,14 @@ export async function executeTurn(
 }
 
 export async function runAgenticLoop(config: LoopConfig): Promise<LoopResult> {
-  logInfo(config.loopName || "Loop", `Initializing model client: ${config.modelName}`);
+  const loopLabel = config.loopName || "Loop";
+  logInfo(loopLabel, `Initializing model client: ${config.modelName}`);
 
-  const contents: Content[] = [
-    {
-      role: "user",
-      parts: [{ text: "Please analyze the loaded document and proceed with the specified task." }],
-    },
-  ];
+  const contents: Content[] = [];
+  appendAndLog(loopLabel, contents, {
+    role: "user",
+    parts: [{ text: "Please analyze the loaded document and proceed with the specified task." }],
+  });
 
   const stats = initLoopStats(config);
 
