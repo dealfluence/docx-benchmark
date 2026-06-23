@@ -61,6 +61,10 @@ npm run benchmark:quick
 
 The live benchmark will compile the codebase, detect active keys in the environment, make actual API calls to run each paradigm and scenario, verify success, assess fidelity, and write reports to `results/<ISO>.json` and `results/<ISO>.md`.
 
+Additionally, all stdout logs and structured tool steps are written in real time to standard-compliant **JSON Lines** (`.jsonl`) files:
+- `./live_benchmark.jsonl` (always contains the logs of the latest benchmark run).
+- `results/<ISO>.jsonl` (contains the logged history for that specific run).
+
 ---
 
 ## Quality Control & Development

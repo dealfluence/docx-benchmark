@@ -57,3 +57,5 @@ temp_*
 /live_benchmark_results.json
 /live_benchmark_results.md
 AI_SESSION.md
+*.jsonl
+

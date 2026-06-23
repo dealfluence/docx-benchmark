@@ -9,6 +9,7 @@ import dotenv from "dotenv";
 import { clearTempDirectory } from "./utils/paths.js";
 import { scenarios } from "./scenarios.js";
 import { evaluateTrial, TrialEvaluation } from "./fidelity.js";
+import { setupFileLogging } from "./utils/logger.js";
 
 export const ADEU_SYSTEM_PROMPT = `You are an expert contract editor. You are provided with the document in Markdown with track changes represented as CriticMarkup (e.g. {++insert++}, {--delete--}).
 Perform the requested edits and output a JSON array of DocumentChange objects representing only the surgical modifications or review actions to be applied.
@@ -61,6 +62,7 @@ export { runAgenticLoop as runUnifiedAgenticLoop, runSafeDocxLoop, runAdeuLoop }
 export { printLiveConsoleSummary, writeLiveResultsFiles } from "./reporting.js";
 
 export async function runLiveBenchmark() {
+  const cleanupLogging = setupFileLogging();
   clearTempDirectory();
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -69,6 +71,7 @@ export async function runLiveBenchmark() {
       `\n\x1b[1m\x1b[31m[API Key Missing]\x1b[0m GEMINI_API_KEY environment variable is required.`,
     );
     console.log(`Gracefully exiting live run...`);
+    cleanupLogging();
     return;
   }
 
@@ -364,6 +367,7 @@ export async function runLiveBenchmark() {
 
   printLiveConsoleSummary(summaries, reps);
   writeLiveResultsFiles(summaries, reps);
+  cleanupLogging();
 }
 
 // Automatically execute main if file is run directly
