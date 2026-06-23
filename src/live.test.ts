@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { DocumentObject } from "@adeu/core";
 import { runLiveBenchmark } from "./live.js";
 import { getGoldenDocxPath } from "./utils/paths.js";
@@ -133,12 +133,17 @@ describe("F4 Guard Test: Token Summing", () => {
 });
 
 describe("F6 Guard Test: Success Discriminates", () => {
-  it("F6: Success criteria validation evaluates scenarios dynamically and correctly", async () => {
-    const docPath = getGoldenDocxPath();
-    const buffer = fs.readFileSync(docPath);
-    const originalDoc = await DocumentObject.load(buffer);
+  let docPath: string;
+  let buffer: Buffer;
+  let originalDoc: DocumentObject;
 
-    // 1. form-fill
+  beforeAll(async () => {
+    docPath = getGoldenDocxPath();
+    buffer = fs.readFileSync(docPath);
+    originalDoc = await DocumentObject.load(buffer);
+  });
+
+  it("F6: form-fill evaluates dynamically and correctly", async () => {
     const passForm = await createStrippedDoc(
       buffer,
       "This Safe certifies that Acme Corporate Technologies, Inc. issues to Jane Founder of 15,000,000.",
@@ -149,8 +154,9 @@ describe("F6 Guard Test: Success Discriminates", () => {
     );
     expect(await checkScenarioSuccess("form-fill", originalDoc, passForm)).toBe(true);
     expect(await checkScenarioSuccess("form-fill", originalDoc, failForm)).toBe(false);
+  });
 
-    // 2. party-swap
+  it("F6: party-swap evaluates dynamically and correctly", async () => {
     const passParty = await createStrippedDoc(
       buffer,
       "Wayne Enterprises agrees to pay Bruce Wayne the sum.",
@@ -161,8 +167,9 @@ describe("F6 Guard Test: Success Discriminates", () => {
     );
     expect(await checkScenarioSuccess("party-swap", originalDoc, passParty)).toBe(true);
     expect(await checkScenarioSuccess("party-swap", originalDoc, failParty)).toBe(false);
+  });
 
-    // 3. policy-checklist-review
+  it("F6: policy-checklist-review evaluates dynamically and correctly", async () => {
     const passPolicy = await createStrippedDoc(
       buffer,
       `Checklist review results: { "governingLaw": "Delaware state laws", "liabilityCap": "General Cap", "standardTermsLink": "https://commonpaper.com/standards" }`,
@@ -177,8 +184,9 @@ describe("F6 Guard Test: Success Discriminates", () => {
     expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, failPolicy)).toBe(
       false,
     );
+  });
 
-    // 4. playbook-commenting
+  it("F6: playbook-commenting evaluates dynamically and correctly", async () => {
     const passComment = await createStrippedDoc(buffer, "Plain text document content");
     passComment.pkg.parts.push({
       partname: "word/comments.xml",
@@ -187,8 +195,9 @@ describe("F6 Guard Test: Success Discriminates", () => {
     const failComment = await createStrippedDoc(buffer, "Plain text document content");
     expect(await checkScenarioSuccess("playbook-commenting", originalDoc, passComment)).toBe(true);
     expect(await checkScenarioSuccess("playbook-commenting", originalDoc, failComment)).toBe(false);
+  });
 
-    // 5. multi-file-assembly
+  it("F6: multi-file-assembly evaluates dynamically and correctly", async () => {
     const tempFilePath = "./temp_test_live_scenario5.docx";
     const tempDpaPath = "./temp_test_live_scenario5_dpa.docx";
 

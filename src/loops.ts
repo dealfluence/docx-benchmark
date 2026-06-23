@@ -603,8 +603,8 @@ export async function runSafeDocxLoop(
   const systemPrompt = `You are an expert contract editor editing Microsoft Word documents (.docx) using the provided Safe Docx MCP tools.
 
 Documents involved in this task:
-- Primary Document: "${tempFilePath}"
-${tempDpaPath ? `- Companion DPA Document: "${tempDpaPath}"` : ""}
+- Primary Document: "${docFileName}"
+${tempDpaPath ? `- Companion DPA Document: "dpa-module.docx"` : ""}
 
 Your task is: ${taskDescription}
 
@@ -688,8 +688,8 @@ export async function runAdeuLoop(
   const systemPrompt = `You are an expert contract editor editing Microsoft Word documents (.docx) using Adeu Virtual DOM.
 
 Documents involved in this task:
-- Primary Document: "${tempFilePath}"
-${tempDpaPath ? `- Companion DPA Document: "${tempDpaPath}"` : ""}
+- Primary Document: "${docFileName}"
+${tempDpaPath ? `- Companion DPA Document: "dpa-module.docx"` : ""}
 
 Your task is: ${taskDescription}
 
