@@ -73,6 +73,16 @@ export interface LoopConfig {
   loopName?: string;
 }
 
+export function middleTruncate(str: string, maxLength = 500): string {
+  if (str.length <= maxLength) return str;
+  const reserve = 30; // space for the middle notice message
+  if (maxLength <= reserve) {
+    return str.substring(0, maxLength) + "...";
+  }
+  const half = Math.floor((maxLength - reserve) / 2);
+  return `${str.substring(0, half)} ... [truncated ${str.length - half * 2} chars] ... ${str.substring(str.length - half)}`;
+}
+
 export function logInfo(prefix: string, message: string) {
   const ts = `[${new Date().toISOString()}]`;
   const p = prefix ? ` [${prefix}]` : "";
@@ -138,9 +148,10 @@ export function appendAndLog(prefix: string, contents: Content[], msg: Content) 
         `    Function Call: ${part.functionCall.name} with args ${JSON.stringify(part.functionCall.args)}`,
       );
     } else if (part.functionResponse) {
+      const respStr = JSON.stringify(part.functionResponse.response);
       logInfo(
         prefix,
-        `    Function Response [${part.functionResponse.name}]: ${JSON.stringify(part.functionResponse.response)}`,
+        `    Function Response [${part.functionResponse.name}]: ${middleTruncate(respStr, 500)}`,
       );
     } else {
       logInfo(prefix, `    Part: ${JSON.stringify(part)}`);
@@ -412,10 +423,6 @@ async function handleFunctionCalls(
         }
         functionResponses.push(res.functionResponse);
       } else {
-        logInfo(
-          prefix,
-          `Initiating Tool Call: '${fc.name}' with args: ${JSON.stringify(fc.args)}...`,
-        );
         const toolResult = await executeTool(fc.name, fc.args as Record<string, unknown>, turn);
         if (toolResult.hadError) currentTurnHadError = true;
         functionResponses.push({
@@ -440,8 +447,7 @@ async function handleFunctionCalls(
     const resStr = JSON.stringify(resObj);
 
     // Truncate the raw stringified tool response for safe logging
-    const truncatedResult =
-      resStr && resStr.length > 350 ? resStr.substring(0, 350) + "..." : resStr;
+    const truncatedResult = resStr ? middleTruncate(resStr, 350) : undefined;
 
     // Extract any reasoning text from the current turn response parts
     const reasoningText = parts
@@ -604,16 +610,11 @@ export function makeMcpToolExecutor(
     if (options.forceSaveOverwrite && name === "save") {
       cleanArgs.allow_overwrite = true;
     }
-    logInfo(
-      options.clientName,
-      `Dispatching tool call '${name}' with args: ${JSON.stringify(cleanArgs)}...`,
-    );
     const toolResult = await withTimeout(
       mcpClient.callTool({ name, arguments: cleanArgs }),
       MCP_TOOL_TIMEOUT_MS,
       `MCP tool call to '${name}' on client '${options.clientName}' timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
     );
-    logInfo(options.clientName, `Tool call '${name}' returned with status.`);
     return {
       result: { result: (toolResult as McpToolResult).content },
       hadError: !isMcpToolSuccess(toolResult as McpToolResult),
