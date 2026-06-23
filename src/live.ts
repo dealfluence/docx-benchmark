@@ -57,7 +57,7 @@ export {
   MCP_CONNECT_TIMEOUT_MS,
   MCP_TOOL_TIMEOUT_MS,
 } from "./utils/gemini.js";
-export { runUnifiedAgenticLoop, runSafeDocxLoop, runAdeuLoop } from "./loops.js";
+export { runAgenticLoop as runUnifiedAgenticLoop, runSafeDocxLoop, runAdeuLoop } from "./loops.js";
 export { printLiveConsoleSummary, writeLiveResultsFiles } from "./reporting.js";
 
 export async function runLiveBenchmark() {

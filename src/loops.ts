@@ -8,6 +8,7 @@ import {
   Part,
   Type,
   GenerateContentResponse,
+  ThinkingLevel,
 } from "@google/genai";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -128,6 +129,7 @@ async function generateContentWithRetry(
           config: {
             systemInstruction: systemPrompt,
             tools: tools.length > 0 ? [{ functionDeclarations: tools }] : undefined,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
           },
         }),
         GEMINI_TIMEOUT_MS,
@@ -162,7 +164,7 @@ async function generateContentWithRetry(
   throw new Error("generateContent failed after maximum retries");
 }
 
-export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<LoopResult> {
+export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopResult> {
   const {
     gemini,
     modelName,
@@ -385,7 +387,7 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
 
         // Truncate the raw stringified tool response for safe logging
         const truncatedResult =
-          resStr && resStr.length > 250 ? resStr.substring(0, 250) + "..." : resStr;
+          resStr && resStr.length > 350 ? resStr.substring(0, 350) + "..." : resStr;
 
         // Extract any reasoning text from the current turn response parts
         const reasoningText = parts
@@ -534,7 +536,6 @@ export function isMcpToolSuccess(toolResult: McpToolResult): boolean {
 
 export function makeMcpToolExecutor(
   mcpClient: Client,
-  mcpTools: McpTool[],
   sessionDir: string,
   options: { forceSaveOverwrite?: boolean; clientName: string },
 ) {
@@ -618,14 +619,14 @@ CRITICAL INSTRUCTIONS FOR SUBMISSION:
 
   const originalDoc = await DocumentObject.load(fs.readFileSync(docPath));
 
-  const result = await runUnifiedAgenticLoop({
+  const result = await runAgenticLoop({
     gemini,
     modelName,
     systemPrompt,
     maxTurns: MAX_TURNS,
     tools: geminiTools,
     loopName: "Safe Docx Loop",
-    executeTool: makeMcpToolExecutor(mcpClient, mcpTools, sessionDir, {
+    executeTool: makeMcpToolExecutor(mcpClient, sessionDir, {
       forceSaveOverwrite: true,
       clientName: "Safe-Docx",
     }),
@@ -704,14 +705,14 @@ CRITICAL INSTRUCTIONS FOR SUBMISSION:
 
   const originalDoc = await DocumentObject.load(docBuffer);
 
-  const result = await runUnifiedAgenticLoop({
+  const result = await runAgenticLoop({
     gemini,
     modelName,
     systemPrompt,
     maxTurns: MAX_TURNS,
     tools: geminiTools,
     loopName: "Adeu Loop",
-    executeTool: makeMcpToolExecutor(mcpClient, mcpTools, sessionDir, {
+    executeTool: makeMcpToolExecutor(mcpClient, sessionDir, {
       forceSaveOverwrite: false,
       clientName: "Adeu-MCP",
     }),
