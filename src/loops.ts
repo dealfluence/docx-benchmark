@@ -9,6 +9,7 @@ import {
   Type,
   GenerateContentResponse,
   ThinkingLevel,
+  FunctionCall,
 } from "@google/genai";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -199,33 +200,8 @@ export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopRes
   let previousTurnHadError = false;
   let success = false;
 
-  let schemaTokensPerTurn = 0;
-  if (tools.length > 0) {
-    try {
-      console.log(
-        `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimating tool schema token footprint using modern client...`,
-      );
-      const testContent = [{ role: "user", parts: [{ text: "hello" }] }];
-      const countNoTools = await gemini.models.countTokens({
-        model: modelName,
-        contents: testContent,
-      });
-      const countWithTools = await gemini.models.countTokens({
-        model: modelName,
-        contents: testContent,
-        config: { tools: [{ functionDeclarations: tools }] },
-      });
-      schemaTokensPerTurn = Math.max(
-        0,
-        (countWithTools.totalTokens || 0) - (countNoTools.totalTokens || 0),
-      );
-      console.log(
-        `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimated Schema Tokens per Turn: ${schemaTokensPerTurn}`,
-      );
-    } catch {
-      schemaTokensPerTurn = 2500;
-    }
-  }
+  const schemaTokensPerTurn: number =
+    tools.length > 0 ? await estimateSchemaTokensPerTurn(loopName, gemini, modelName, tools) : 0;
 
   let schemaTokens = 0;
   let historyTokens = 0;
@@ -309,107 +285,23 @@ export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopRes
       const turnStart = performance.now();
       let shouldExitSucceeded = false;
 
-      for (const fc of functionCalls) {
-        if (!fc.name) {
-          console.warn(
-            `${getLoopTimestamp()} [WARNING] ${prefix} Skipping anonymous or invalid function call.`,
-          );
-          continue;
-        }
-        const toolName = fc.name;
-        try {
-          if (toolName === "complete_task") {
-            completeTaskCalls++;
-            console.log(
-              `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Intercepting task submission. Checking validation gate...`,
-            );
-            const isSuccessNow = await checkSuccess(turn);
-            if (isSuccessNow) {
-              console.log(
-                `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Validation gate PASSED! Recording success.`,
-              );
-              success = true;
-              turnsToSuccess = turn;
-              shouldExitSucceeded = true;
-              functionResponses.push({
-                name: toolName,
-                response: {
-                  success: true,
-                  message: "Submission accepted. All validation checks passed.",
-                },
-              });
-            } else {
-              console.log(
-                `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Validation gate FAILED. Rejecting submission with linter feedback.`,
-              );
-              currentTurnHadError = true;
-              functionResponses.push({
-                name: toolName,
-                response: {
-                  success: false,
-                  error:
-                    "Submission Rejected: The validation gate failed. Your document does not yet satisfy all task criteria. Please ensure all requested edits are correctly applied, saved to disk, and no placeholders remain before re-submitting.",
-                },
-              });
-            }
-          } else {
-            console.log(
-              `${getLoopTimestamp()} [INFO] ${prefix} Initiating Tool Call: '${fc.name}' with args: ${JSON.stringify(fc.args)}...`,
-            );
-            const toolResult = await executeTool(fc.name, fc.args as Record<string, unknown>, turn);
-            if (toolResult.hadError) currentTurnHadError = true;
-            functionResponses.push({
-              name: fc.name,
-              response: toolResult.error
-                ? { error: toolResult.error }
-                : (toolResult.result as Record<string, unknown>),
-            });
-          }
-        } catch (err) {
-          currentTurnHadError = true;
-          const errMsg = err instanceof Error ? err.message : String(err);
-          console.error(
-            `${getLoopTimestamp()} \x1b[31m[ERROR] ${prefix} Exception occurred inside tool '${fc.name}':\x1b[0m`,
-            errMsg,
-          );
-          if (err instanceof Error && err.stack) {
-            console.error(`Stack trace:\n${err.stack}`);
-          }
-          functionResponses.push({
-            name: fc.name,
-            response: { error: errMsg },
-          });
-        }
-
-        const elapsedMs = Math.round(performance.now() - turnStart);
-        const resObj = functionResponses[functionResponses.length - 1]?.response;
-        const resStr = JSON.stringify(resObj);
-
-        // Truncate the raw stringified tool response for safe logging
-        const truncatedResult =
-          resStr && resStr.length > 350 ? resStr.substring(0, 350) + "..." : resStr;
-
-        // Extract any reasoning text from the current turn response parts
-        const reasoningText = parts
-          .filter((p: Part) => p.text)
-          .map((p: Part) => p.text!.trim())
-          .join("\n");
-
-        console.log(
-          JSON.stringify({
-            timestamp: new Date().toISOString(),
-            turn,
-            paradigm: loopName,
-            reasoning: reasoningText || undefined,
-            tool: fc.name,
-            args: fc.args,
-            ok: !currentTurnHadError,
-            resultBytes: resStr ? resStr.length : 0,
-            result: truncatedResult || undefined,
-            elapsedMs,
-          }),
-        );
-      }
+      ({ completeTaskCalls, success, turnsToSuccess, shouldExitSucceeded, currentTurnHadError } =
+        await handleFunctionCalls(
+          functionCalls,
+          prefix,
+          completeTaskCalls,
+          checkSuccess,
+          turn,
+          success,
+          turnsToSuccess,
+          shouldExitSucceeded,
+          functionResponses,
+          currentTurnHadError,
+          executeTool,
+          turnStart,
+          parts,
+          loopName,
+        ));
 
       contents.push({
         role: "user",
@@ -451,6 +343,185 @@ export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopRes
     newContentTokens,
     completeTaskCalls,
   };
+}
+
+async function handleFunctionCalls(
+  functionCalls: FunctionCall[],
+  prefix: string,
+  completeTaskCalls: number,
+  checkSuccess: (turn: number) => Promise<boolean>,
+  turn: number,
+  success: boolean,
+  turnsToSuccess: number,
+  shouldExitSucceeded: boolean,
+  functionResponses: { name: string; response: Record<string, unknown> }[],
+  currentTurnHadError: boolean,
+  executeTool: (
+    name: string,
+    args: Record<string, unknown>,
+    turn: number,
+  ) => Promise<{ result?: unknown; error?: string; hadError: boolean }>,
+  turnStart: number,
+  parts: Part[],
+  loopName: string | undefined,
+) {
+  for (const fc of functionCalls) {
+    if (!fc.name) {
+      console.warn(
+        `${getLoopTimestamp()} [WARNING] ${prefix} Skipping anonymous or invalid function call.`,
+      );
+      continue;
+    }
+    const toolName = fc.name;
+    try {
+      if (toolName === "complete_task") {
+        completeTaskCalls++;
+        ({ success, turnsToSuccess, shouldExitSucceeded, currentTurnHadError } =
+          await handleCompleteTaskCall(
+            prefix,
+            checkSuccess,
+            turn,
+            success,
+            turnsToSuccess,
+            shouldExitSucceeded,
+            functionResponses,
+            toolName,
+            currentTurnHadError,
+          ));
+      } else {
+        console.log(
+          `${getLoopTimestamp()} [INFO] ${prefix} Initiating Tool Call: '${fc.name}' with args: ${JSON.stringify(fc.args)}...`,
+        );
+        const toolResult = await executeTool(fc.name, fc.args as Record<string, unknown>, turn);
+        if (toolResult.hadError) currentTurnHadError = true;
+        functionResponses.push({
+          name: fc.name,
+          response: toolResult.error
+            ? { error: toolResult.error }
+            : (toolResult.result as Record<string, unknown>),
+        });
+      }
+    } catch (err) {
+      currentTurnHadError = true;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `${getLoopTimestamp()} \x1b[31m[ERROR] ${prefix} Exception occurred inside tool '${fc.name}':\x1b[0m`,
+        errMsg,
+      );
+      if (err instanceof Error && err.stack) {
+        console.error(`Stack trace:\n${err.stack}`);
+      }
+      functionResponses.push({
+        name: fc.name,
+        response: { error: errMsg },
+      });
+    }
+
+    const elapsedMs = Math.round(performance.now() - turnStart);
+    const resObj = functionResponses[functionResponses.length - 1]?.response;
+    const resStr = JSON.stringify(resObj);
+
+    // Truncate the raw stringified tool response for safe logging
+    const truncatedResult =
+      resStr && resStr.length > 350 ? resStr.substring(0, 350) + "..." : resStr;
+
+    // Extract any reasoning text from the current turn response parts
+    const reasoningText = parts
+      .filter((p: Part) => p.text)
+      .map((p: Part) => p.text!.trim())
+      .join("\n");
+
+    console.log(
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        turn,
+        paradigm: loopName,
+        reasoning: reasoningText || undefined,
+        tool: fc.name,
+        args: fc.args,
+        ok: !currentTurnHadError,
+        resultBytes: resStr ? resStr.length : 0,
+        result: truncatedResult || undefined,
+        elapsedMs,
+      }),
+    );
+  }
+  return { completeTaskCalls, success, turnsToSuccess, shouldExitSucceeded, currentTurnHadError };
+}
+
+async function handleCompleteTaskCall(
+  prefix: string,
+  checkSuccess: (turn: number) => Promise<boolean>,
+  turn: number,
+  success: boolean,
+  turnsToSuccess: number,
+  shouldExitSucceeded: boolean,
+  functionResponses: { name: string; response: Record<string, unknown> }[],
+  toolName: string,
+  currentTurnHadError: boolean,
+) {
+  console.log(
+    `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Intercepting task submission. Checking validation gate...`,
+  );
+  const isSuccessNow = await checkSuccess(turn);
+  if (isSuccessNow) {
+    console.log(
+      `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Validation gate PASSED! Recording success.`,
+    );
+    success = true;
+    turnsToSuccess = turn;
+    shouldExitSucceeded = true;
+    functionResponses.push({
+      name: toolName,
+      response: {
+        success: true,
+        message: "Submission accepted. All validation checks passed.",
+      },
+    });
+  } else {
+    console.log(
+      `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Validation gate FAILED. Rejecting submission with linter feedback.`,
+    );
+    currentTurnHadError = true;
+    functionResponses.push({
+      name: toolName,
+      response: {
+        success: false,
+        error:
+          "Submission Rejected: The validation gate failed. Your document does not yet satisfy all task criteria. Please ensure all requested edits are correctly applied, saved to disk, and no placeholders remain before re-submitting.",
+      },
+    });
+  }
+  return { success, turnsToSuccess, shouldExitSucceeded, currentTurnHadError };
+}
+
+async function estimateSchemaTokensPerTurn(
+  loopName: string | undefined,
+  gemini: GoogleGenAI,
+  modelName: string,
+  tools: FunctionDeclaration[],
+) {
+  console.log(
+    `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimating tool schema token footprint using modern client...`,
+  );
+  const testContent = [{ role: "user", parts: [{ text: "hello" }] }];
+  const countNoTools = await gemini.models.countTokens({
+    model: modelName,
+    contents: testContent,
+  });
+  const countWithTools = await gemini.models.countTokens({
+    model: modelName,
+    contents: testContent,
+    config: { tools: [{ functionDeclarations: tools }] },
+  });
+  const schemaTokensPerTurn = Math.max(
+    0,
+    (countWithTools.totalTokens || 0) - (countNoTools.totalTokens || 0),
+  );
+  console.log(
+    `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimated Schema Tokens per Turn: ${schemaTokensPerTurn}`,
+  );
+  return schemaTokensPerTurn;
 }
 
 export async function connectMcpClient(
