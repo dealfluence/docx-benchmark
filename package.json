@@ -22,22 +22,22 @@
   "author": "",
   "license": "AGPL-3.0-only",
   "dependencies": {
-    "@adeu/core": "^1.10.1",
+    "@adeu/core": "^1.12.1",
     "@anthropic-ai/sdk": "^0.104.2",
     "@google/genai": "^2.9.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@xmldom/xmldom": "^0.9.10",
     "dotenv": "^17.4.2",
     "js-tiktoken": "^1.0.21",
-    "openai": "^6.42.0",
+    "openai": "^6.44.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^25.9.3",
-    "@typescript-eslint/eslint-plugin": "^8.61.1",
-    "@typescript-eslint/parser": "^8.61.1",
+    "@types/node": "^25.9.4",
+    "@typescript-eslint/eslint-plugin": "^8.62.0",
+    "@typescript-eslint/parser": "^8.62.0",
     "eslint": "^10.5.0",
-    "husky": "latest",
+    "husky": "^9.1.7",
     "prettier": "^3.8.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
