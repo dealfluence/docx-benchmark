@@ -258,7 +258,7 @@ export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopRes
         `${getLoopTimestamp()} [INFO] ${prefix} Turn Metrics: [Tokens In: ${promptTokensThisTurn} (Schema: ${sTokens}, History: ${hTokens}, New Content: ${nTokens}) | Tokens Out: ${candidatesTokensThisTurn}]`,
       );
       console.log(
-        `${getLoopTimestamp()} [INFO] ${prefix} Cumulative Totals: [Tokens In: ${tokensIn} | Tokens Out: ${tokensOut} | Total: ${tokensIn + tokensOut}]`,
+        `${getLoopTimestamp()} [INFO] ${prefix} Cum. Totals: [Tokens In: ${tokensIn} | Tokens Out: ${tokensOut} | Total: ${tokensIn + tokensOut}]`,
       );
 
       const parts = geminiResponse.candidates?.[0]?.content?.parts || [];
