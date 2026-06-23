@@ -15,7 +15,7 @@ async function main() {
 
   console.log("\n=== LISTING ADEU TOOLS ===");
   try {
-    const { tools } = await connectMcpClient("@adeu/mcp-server", "adeu-list");
+    const { tools } = await connectMcpClient("@adeu/mcp-server", "adeu-list", ["--scope", "docx"]);
     for (const t of tools) {
       console.log(`- Tool: ${t.name}`);
       console.log(`  Description: ${t.description}`);

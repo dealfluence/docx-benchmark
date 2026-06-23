@@ -453,13 +453,17 @@ export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopRes
   };
 }
 
-export async function connectMcpClient(packageName: string, clientName: string) {
+export async function connectMcpClient(
+  packageName: string,
+  clientName: string,
+  extraArgs: string[] = [],
+) {
   console.log(
     `${getLoopTimestamp()} [INFO] Connecting to MCP Server package '${packageName}' (client: '${clientName}')...`,
   );
   const transport = new StdioClientTransport({
     command: "npx",
-    args: ["-y", packageName],
+    args: ["-y", packageName, ...extraArgs],
   });
   const mcpClient = new Client({ name: clientName, version: "1.0.0" }, { capabilities: {} });
   await withTimeout(
@@ -683,6 +687,7 @@ export async function runAdeuLoop(
   const { mcpClient, tools: mcpTools } = await connectMcpClient(
     "@adeu/mcp-server",
     "adeu-benchmark-client",
+    ["--scope", "docx"],
   );
   const geminiTools = [...mapToGeminiTools(mcpTools), COMPLETE_TASK_TOOL];
 
