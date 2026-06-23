@@ -40,6 +40,22 @@ export interface LoopResult {
   completeTaskCalls?: number;
 }
 
+export interface LoopStats {
+  tokensIn: number;
+  tokensOut: number;
+  schemaTokens: number;
+  historyTokens: number;
+  newContentTokens: number;
+  historyAccumulated: number;
+  roundTrips: number;
+  turnsToSuccess: number;
+  errorTurns: number;
+  recoveryTurns: number;
+  completeTaskCalls: number;
+  previousTurnHadError: boolean;
+  success: boolean;
+}
+
 export interface UnifiedLoopConfig {
   gemini: GoogleGenAI;
   modelName: string;
@@ -57,7 +73,26 @@ export interface UnifiedLoopConfig {
   loopName?: string;
 }
 
-const getLoopTimestamp = () => `[${new Date().toISOString()}]`;
+export function logInfo(prefix: string, message: string) {
+  const ts = `[${new Date().toISOString()}]`;
+  const p = prefix ? ` [${prefix}]` : "";
+  console.log(`${ts} [INFO]${p} ${message}`);
+}
+
+export function logWarn(prefix: string, message: string) {
+  const ts = `[${new Date().toISOString()}]`;
+  const p = prefix ? ` [${prefix}]` : "";
+  console.warn(`${ts} [WARNING]${p} ${message}`);
+}
+
+export function logError(prefix: string, message: string, err?: unknown) {
+  const ts = `[${new Date().toISOString()}]`;
+  const p = prefix ? ` [${prefix}]` : "";
+  console.error(`${ts} [ERROR]${p} ${message}`);
+  if (err) {
+    console.error(err);
+  }
+}
 
 export const MAX_TURNS = 20;
 
@@ -82,15 +117,38 @@ export function cleanTempDirOnStartup() {
           fs.rmSync(fullPath, { recursive: true, force: true });
         }
       }
-      console.log(
-        `${getLoopTimestamp()} [INFO] Cleaned stale session directories under: ${tempDir}`,
-      );
+      logInfo("", `Cleaned stale session directories under: ${tempDir}`);
     } else {
       fs.mkdirSync(tempDir, { recursive: true });
     }
   } catch (err) {
-    console.warn(`${getLoopTimestamp()} [WARNING] Failed to clean temp dir: ${err}`);
+    logWarn("", `Failed to clean temp dir: ${err}`);
   }
+}
+
+export function logContents(prefix: string, contents: Content[]) {
+  logInfo(prefix, `=== Sending Conversation History (Total Messages: ${contents.length}) ===`);
+  contents.forEach((msg, idx) => {
+    logInfo(prefix, `  Message [${idx + 1}] Role: ${msg.role}`);
+    for (const part of msg.parts || []) {
+      if (part.text) {
+        logInfo(prefix, `    Text: "${part.text.trim()}"`);
+      } else if (part.functionCall) {
+        logInfo(
+          prefix,
+          `    Function Call: ${part.functionCall.name} with args ${JSON.stringify(part.functionCall.args)}`,
+        );
+      } else if (part.functionResponse) {
+        logInfo(
+          prefix,
+          `    Function Response [${part.functionResponse.name}]: ${JSON.stringify(part.functionResponse.response)}`,
+        );
+      } else {
+        logInfo(prefix, `    Part: ${JSON.stringify(part)}`);
+      }
+    }
+  });
+  logInfo(prefix, `======================================================`);
 }
 
 export const COMPLETE_TASK_TOOL: FunctionDeclaration = {
@@ -155,8 +213,9 @@ async function generateContentWithRetry(
         throw err;
       }
 
-      console.warn(
-        `[${new Date().toISOString()}] [WARNING] generateContent call failed on attempt ${attempt}/${maxRetries} (Error: ${errorMessage}). Retrying in ${delay}ms...`,
+      logWarn(
+        "",
+        `generateContent call failed on attempt ${attempt}/${maxRetries} (Error: ${errorMessage}). Retrying in ${delay}ms...`,
       );
       await new Promise((resolve) => setTimeout(resolve, delay));
       delay *= 2;
@@ -165,23 +224,132 @@ async function generateContentWithRetry(
   throw new Error("generateContent failed after maximum retries");
 }
 
-export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopResult> {
-  const {
-    gemini,
-    modelName,
-    systemPrompt,
-    maxTurns,
-    tools,
-    executeTool,
-    checkSuccess,
-    getFinalBuffer,
-    cleanup,
-    loopName,
-  } = config;
+export function initLoopStats(): LoopStats {
+  return {
+    tokensIn: 0,
+    tokensOut: 0,
+    schemaTokens: 0,
+    historyTokens: 0,
+    newContentTokens: 0,
+    historyAccumulated: 0,
+    roundTrips: 0,
+    turnsToSuccess: 0,
+    errorTurns: 0,
+    recoveryTurns: 0,
+    completeTaskCalls: 0,
+    previousTurnHadError: false,
+    success: false,
+  };
+}
 
-  console.log(
-    `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Initializing model client: ${modelName}`,
+export async function executeTurn(
+  turn: number,
+  config: UnifiedLoopConfig,
+  contents: Content[],
+  stats: LoopStats,
+  schemaTokensPerTurn: number,
+): Promise<{ shouldBreak: boolean }> {
+  const prefix = config.loopName ? `${config.loopName} Turn ${turn}` : `Loop Turn ${turn}`;
+  const isVerbose = process.argv.includes("--verbose");
+
+  if (isVerbose) {
+    logInfo(prefix, `Sending prompt content length: ${contents.length} messages.`);
+  }
+
+  // Log exact conversation payload history
+  logContents(prefix, contents);
+
+  logInfo(prefix, `Dispatching API call (timeout: ${GEMINI_TIMEOUT_MS}ms)...`);
+  const geminiResponse = await generateContentWithRetry(
+    config.gemini,
+    config.modelName,
+    contents,
+    config.systemPrompt,
+    config.tools,
+  ).catch((err) => {
+    logError(prefix, `generateContent failed or was aborted!`, err);
+    throw err;
+  });
+
+  logInfo(prefix, `generateContent call returned successfully.`);
+
+  const promptTokensThisTurn = geminiResponse.usageMetadata?.promptTokenCount || 0;
+  const candidatesTokensThisTurn = geminiResponse.usageMetadata?.candidatesTokenCount || 0;
+
+  stats.tokensIn += promptTokensThisTurn;
+  stats.tokensOut += candidatesTokensThisTurn;
+
+  const sTokens = Math.min(schemaTokensPerTurn, promptTokensThisTurn);
+  const hTokens = Math.min(stats.historyAccumulated, promptTokensThisTurn - sTokens);
+  const nTokens = promptTokensThisTurn - sTokens - hTokens;
+
+  stats.schemaTokens += sTokens;
+  stats.historyTokens += hTokens;
+  stats.newContentTokens += nTokens;
+  stats.historyAccumulated = hTokens + nTokens + candidatesTokensThisTurn;
+
+  logInfo(
+    prefix,
+    `Turn Metrics: [Tokens In: ${promptTokensThisTurn} (Schema: ${sTokens}, History: ${hTokens}, New Content: ${nTokens}) | Tokens Out: ${candidatesTokensThisTurn}]`,
   );
+  logInfo(
+    prefix,
+    `Cum. Totals: [Tokens In: ${stats.tokensIn} | Tokens Out: ${stats.tokensOut} | Total: ${stats.tokensIn + stats.tokensOut}]`,
+  );
+
+  const parts = geminiResponse.candidates?.[0]?.content?.parts || [];
+  const functionCalls = geminiResponse.functionCalls || [];
+
+  if (isVerbose) {
+    logInfo(
+      prefix,
+      `Model generated ${parts.length} parts and ${functionCalls.length} function calls.`,
+    );
+  }
+
+  if (functionCalls.length === 0) {
+    logInfo(prefix, `No function calls generated. Breaking loop (Task is finalized).`);
+    return { shouldBreak: true };
+  }
+
+  stats.roundTrips++;
+  contents.push({ role: "model", parts });
+
+  const functionResponses: Array<{ name: string; response: Record<string, unknown> }> = [];
+  const turnStart = performance.now();
+
+  const { shouldExitSucceeded, currentTurnHadError } = await handleFunctionCalls(
+    functionCalls,
+    prefix,
+    stats,
+    config.checkSuccess,
+    turn,
+    functionResponses,
+    config.executeTool,
+    turnStart,
+    parts,
+    config.loopName,
+  );
+
+  contents.push({
+    role: "user",
+    parts: functionResponses.map((fr) => ({ functionResponse: fr })),
+  });
+
+  if (currentTurnHadError) {
+    stats.errorTurns++;
+  } else if (stats.previousTurnHadError) {
+    stats.recoveryTurns++;
+  }
+  stats.previousTurnHadError = currentTurnHadError;
+
+  return { shouldBreak: shouldExitSucceeded };
+}
+
+export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopResult> {
+  const { gemini, modelName, maxTurns, tools, getFinalBuffer, cleanup, loopName } = config;
+
+  logInfo(loopName || "Loop", `Initializing model client: ${modelName}`);
 
   const contents: Content[] = [
     {
@@ -190,132 +358,17 @@ export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopRes
     },
   ];
 
-  let tokensIn = 0;
-  let tokensOut = 0;
-  let roundTrips = 0;
-  let turnsToSuccess = 0;
-  let errorTurns = 0;
-  let recoveryTurns = 0;
-  let completeTaskCalls = 0;
-  let previousTurnHadError = false;
-  let success = false;
+  const stats = initLoopStats();
 
   const schemaTokensPerTurn: number =
     tools.length > 0 ? await estimateSchemaTokensPerTurn(loopName, gemini, modelName, tools) : 0;
 
-  let schemaTokens = 0;
-  let historyTokens = 0;
-  let newContentTokens = 0;
-  let historyAccumulated = 0;
   let finalBuffer: Buffer | null = null;
 
   try {
     for (let turn = 1; turn <= maxTurns; turn++) {
-      const prefix = loopName ? `[${loopName} Turn ${turn}]` : `[Loop Turn ${turn}]`;
-      const isVerbose = process.argv.includes("--verbose");
-      if (isVerbose) {
-        console.log(
-          `${getLoopTimestamp()} \x1b[36m${prefix}\x1b[0m Sending prompt content length: ${contents.length} messages.`,
-        );
-      }
-
-      console.log(
-        `${getLoopTimestamp()} [INFO] ${prefix} Dispatching API call (timeout: ${GEMINI_TIMEOUT_MS}ms)...`,
-      );
-      const geminiResponse = await generateContentWithRetry(
-        gemini,
-        modelName,
-        contents,
-        systemPrompt,
-        tools,
-      ).catch((err) => {
-        console.error(
-          `${getLoopTimestamp()} \x1b[31m[ERROR] ${prefix} generateContent failed or was aborted!\x1b[0m`,
-        );
-        throw err;
-      });
-
-      console.log(
-        `${getLoopTimestamp()} [INFO] ${prefix} generateContent call returned successfully.`,
-      );
-
-      const promptTokensThisTurn = geminiResponse.usageMetadata?.promptTokenCount || 0;
-      const candidatesTokensThisTurn = geminiResponse.usageMetadata?.candidatesTokenCount || 0;
-
-      tokensIn += promptTokensThisTurn;
-      tokensOut += candidatesTokensThisTurn;
-
-      const sTokens = Math.min(schemaTokensPerTurn, promptTokensThisTurn);
-      const hTokens = Math.min(historyAccumulated, promptTokensThisTurn - sTokens);
-      const nTokens = promptTokensThisTurn - sTokens - hTokens;
-
-      schemaTokens += sTokens;
-      historyTokens += hTokens;
-      newContentTokens += nTokens;
-      historyAccumulated = hTokens + nTokens + candidatesTokensThisTurn;
-
-      console.log(
-        `${getLoopTimestamp()} [INFO] ${prefix} Turn Metrics: [Tokens In: ${promptTokensThisTurn} (Schema: ${sTokens}, History: ${hTokens}, New Content: ${nTokens}) | Tokens Out: ${candidatesTokensThisTurn}]`,
-      );
-      console.log(
-        `${getLoopTimestamp()} [INFO] ${prefix} Cum. Totals: [Tokens In: ${tokensIn} | Tokens Out: ${tokensOut} | Total: ${tokensIn + tokensOut}]`,
-      );
-
-      const parts = geminiResponse.candidates?.[0]?.content?.parts || [];
-      const functionCalls = geminiResponse.functionCalls || [];
-
-      if (isVerbose) {
-        console.log(
-          `${getLoopTimestamp()} \x1b[36m${prefix}\x1b[0m Model generated ${parts.length} parts and ${functionCalls.length} function calls.`,
-        );
-      }
-
-      if (functionCalls.length === 0) {
-        console.log(
-          `${getLoopTimestamp()} [INFO] ${prefix} No function calls generated. Breaking loop (Task is finalized).`,
-        );
-        break;
-      }
-
-      roundTrips++;
-      contents.push({ role: "model", parts });
-
-      const functionResponses: Array<{ name: string; response: Record<string, unknown> }> = [];
-      let currentTurnHadError = false;
-      const turnStart = performance.now();
-      let shouldExitSucceeded = false;
-
-      ({ completeTaskCalls, success, turnsToSuccess, shouldExitSucceeded, currentTurnHadError } =
-        await handleFunctionCalls(
-          functionCalls,
-          prefix,
-          completeTaskCalls,
-          checkSuccess,
-          turn,
-          success,
-          turnsToSuccess,
-          shouldExitSucceeded,
-          functionResponses,
-          currentTurnHadError,
-          executeTool,
-          turnStart,
-          parts,
-          loopName,
-        ));
-
-      contents.push({
-        role: "user",
-        parts: functionResponses.map((fr) => ({ functionResponse: fr })),
-      });
-
-      if (currentTurnHadError) {
-        errorTurns++;
-      } else if (previousTurnHadError) {
-        recoveryTurns++;
-      }
-      previousTurnHadError = currentTurnHadError;
-
-      if (shouldExitSucceeded) {
+      const { shouldBreak } = await executeTurn(turn, config, contents, stats, schemaTokensPerTurn);
+      if (shouldBreak) {
         break;
       }
     }
@@ -328,34 +381,30 @@ export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopRes
     if (cleanup) await cleanup();
   }
 
-  const recoveryRate = errorTurns > 0 ? recoveryTurns / errorTurns : 0;
+  const recoveryRate = stats.errorTurns > 0 ? stats.recoveryTurns / stats.errorTurns : 0;
 
   return {
-    tokensIn,
-    tokensOut,
-    roundTrips,
-    turnsToSuccess: success ? turnsToSuccess : maxTurns,
+    tokensIn: stats.tokensIn,
+    tokensOut: stats.tokensOut,
+    roundTrips: stats.roundTrips,
+    turnsToSuccess: stats.success ? stats.turnsToSuccess : maxTurns,
     recoveryRate,
     finalBuffer: finalBuffer || Buffer.alloc(0),
-    success,
-    schemaTokens,
-    historyTokens,
-    newContentTokens,
-    completeTaskCalls,
+    success: stats.success,
+    schemaTokens: stats.schemaTokens,
+    historyTokens: stats.historyTokens,
+    newContentTokens: stats.newContentTokens,
+    completeTaskCalls: stats.completeTaskCalls,
   };
 }
 
 async function handleFunctionCalls(
   functionCalls: FunctionCall[],
   prefix: string,
-  completeTaskCalls: number,
+  stats: LoopStats,
   checkSuccess: (turn: number) => Promise<boolean>,
   turn: number,
-  success: boolean,
-  turnsToSuccess: number,
-  shouldExitSucceeded: boolean,
   functionResponses: { name: string; response: Record<string, unknown> }[],
-  currentTurnHadError: boolean,
   executeTool: (
     name: string,
     args: Record<string, unknown>,
@@ -364,33 +413,29 @@ async function handleFunctionCalls(
   turnStart: number,
   parts: Part[],
   loopName: string | undefined,
-) {
+): Promise<{ shouldExitSucceeded: boolean; currentTurnHadError: boolean }> {
+  let currentTurnHadError = false;
+  let shouldExitSucceeded = false;
+
   for (const fc of functionCalls) {
     if (!fc.name) {
-      console.warn(
-        `${getLoopTimestamp()} [WARNING] ${prefix} Skipping anonymous or invalid function call.`,
-      );
+      logWarn(prefix, `Skipping anonymous or invalid function call.`);
       continue;
     }
     const toolName = fc.name;
     try {
       if (toolName === "complete_task") {
-        completeTaskCalls++;
-        ({ success, turnsToSuccess, shouldExitSucceeded, currentTurnHadError } =
-          await handleCompleteTaskCall(
-            prefix,
-            checkSuccess,
-            turn,
-            success,
-            turnsToSuccess,
-            shouldExitSucceeded,
-            functionResponses,
-            toolName,
-            currentTurnHadError,
-          ));
+        stats.completeTaskCalls++;
+        const res = await handleCompleteTaskCall(prefix, checkSuccess, turn, stats, toolName);
+        shouldExitSucceeded = res.shouldExitSucceeded;
+        if (res.currentTurnHadError) {
+          currentTurnHadError = true;
+        }
+        functionResponses.push(res.functionResponse);
       } else {
-        console.log(
-          `${getLoopTimestamp()} [INFO] ${prefix} Initiating Tool Call: '${fc.name}' with args: ${JSON.stringify(fc.args)}...`,
+        logInfo(
+          prefix,
+          `Initiating Tool Call: '${fc.name}' with args: ${JSON.stringify(fc.args)}...`,
         );
         const toolResult = await executeTool(fc.name, fc.args as Record<string, unknown>, turn);
         if (toolResult.hadError) currentTurnHadError = true;
@@ -404,13 +449,7 @@ async function handleFunctionCalls(
     } catch (err) {
       currentTurnHadError = true;
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(
-        `${getLoopTimestamp()} \x1b[31m[ERROR] ${prefix} Exception occurred inside tool '${fc.name}':\x1b[0m`,
-        errMsg,
-      );
-      if (err instanceof Error && err.stack) {
-        console.error(`Stack trace:\n${err.stack}`);
-      }
+      logError(prefix, `Exception occurred inside tool '${fc.name}':`, err);
       functionResponses.push({
         name: fc.name,
         response: { error: errMsg },
@@ -446,53 +485,54 @@ async function handleFunctionCalls(
       }),
     );
   }
-  return { completeTaskCalls, success, turnsToSuccess, shouldExitSucceeded, currentTurnHadError };
+  return { shouldExitSucceeded, currentTurnHadError };
 }
 
 async function handleCompleteTaskCall(
   prefix: string,
   checkSuccess: (turn: number) => Promise<boolean>,
   turn: number,
-  success: boolean,
-  turnsToSuccess: number,
-  shouldExitSucceeded: boolean,
-  functionResponses: { name: string; response: Record<string, unknown> }[],
+  stats: LoopStats,
   toolName: string,
-  currentTurnHadError: boolean,
-) {
-  console.log(
-    `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Intercepting task submission. Checking validation gate...`,
-  );
+): Promise<{
+  shouldExitSucceeded: boolean;
+  currentTurnHadError: boolean;
+  functionResponse: { name: string; response: Record<string, unknown> };
+}> {
+  logInfo(prefix, `[complete_task] Intercepting task submission. Checking validation gate...`);
   const isSuccessNow = await checkSuccess(turn);
+  let shouldExitSucceeded = false;
+  let currentTurnHadError = false;
+  let functionResponse: { name: string; response: Record<string, unknown> };
+
   if (isSuccessNow) {
-    console.log(
-      `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Validation gate PASSED! Recording success.`,
-    );
-    success = true;
-    turnsToSuccess = turn;
+    logInfo(prefix, `[complete_task] Validation gate PASSED! Recording success.`);
+    stats.success = true;
+    stats.turnsToSuccess = turn;
     shouldExitSucceeded = true;
-    functionResponses.push({
+    functionResponse = {
       name: toolName,
       response: {
         success: true,
         message: "Submission accepted. All validation checks passed.",
       },
-    });
+    };
   } else {
-    console.log(
-      `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Validation gate FAILED. Rejecting submission with linter feedback.`,
+    logInfo(
+      prefix,
+      `[complete_task] Validation gate FAILED. Rejecting submission with linter feedback.`,
     );
     currentTurnHadError = true;
-    functionResponses.push({
+    functionResponse = {
       name: toolName,
       response: {
         success: false,
         error:
           "Submission Rejected: The validation gate failed. Your document does not yet satisfy all task criteria. Please ensure all requested edits are correctly applied, saved to disk, and no placeholders remain before re-submitting.",
       },
-    });
+    };
   }
-  return { success, turnsToSuccess, shouldExitSucceeded, currentTurnHadError };
+  return { shouldExitSucceeded, currentTurnHadError, functionResponse };
 }
 
 async function estimateSchemaTokensPerTurn(
@@ -501,9 +541,7 @@ async function estimateSchemaTokensPerTurn(
   modelName: string,
   tools: FunctionDeclaration[],
 ) {
-  console.log(
-    `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimating tool schema token footprint using modern client...`,
-  );
+  logInfo(loopName || "Loop", `Estimating tool schema token footprint using modern client...`);
   const testContent = [{ role: "user", parts: [{ text: "hello" }] }];
   const countNoTools = await gemini.models.countTokens({
     model: modelName,
@@ -518,9 +556,7 @@ async function estimateSchemaTokensPerTurn(
     0,
     (countWithTools.totalTokens || 0) - (countNoTools.totalTokens || 0),
   );
-  console.log(
-    `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimated Schema Tokens per Turn: ${schemaTokensPerTurn}`,
-  );
+  logInfo(loopName || "Loop", `Estimated Schema Tokens per Turn: ${schemaTokensPerTurn}`);
   return schemaTokensPerTurn;
 }
 
@@ -529,9 +565,7 @@ export async function connectMcpClient(
   clientName: string,
   extraArgs: string[] = [],
 ) {
-  console.log(
-    `${getLoopTimestamp()} [INFO] Connecting to MCP Server package '${packageName}' (client: '${clientName}')...`,
-  );
+  logInfo("", `Connecting to MCP Server package '${packageName}' (client: '${clientName}')...`);
   const transport = new StdioClientTransport({
     command: "npx",
     args: ["-y", packageName, ...extraArgs],
@@ -542,20 +576,17 @@ export async function connectMcpClient(
     MCP_CONNECT_TIMEOUT_MS,
     `${clientName} connection timed out after ${MCP_CONNECT_TIMEOUT_MS}ms`,
   );
-  console.log(
-    `${getLoopTimestamp()} [INFO] Connection handshake completed with MCP Server '${clientName}'.`,
-  );
+  logInfo("", `Connection handshake completed with MCP Server '${clientName}'.`);
 
-  console.log(
-    `${getLoopTimestamp()} [INFO] Retrieving tool registrations from MCP Server '${clientName}'...`,
-  );
+  logInfo("", `Retrieving tool registrations from MCP Server '${clientName}'...`);
   const toolsResponse = await withTimeout(
     mcpClient.listTools(),
     MCP_TOOL_TIMEOUT_MS,
     `${clientName} listTools timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
   );
-  console.log(
-    `${getLoopTimestamp()} [INFO] Successfully listed ${toolsResponse.tools.length} tool(s) from MCP Server '${clientName}'.`,
+  logInfo(
+    "",
+    `Successfully listed ${toolsResponse.tools.length} tool(s) from MCP Server '${clientName}'.`,
   );
   return { mcpClient, tools: toolsResponse.tools };
 }
@@ -619,17 +650,16 @@ export function makeMcpToolExecutor(
     if (options.forceSaveOverwrite && name === "save") {
       cleanArgs.allow_overwrite = true;
     }
-    console.log(
-      `${getLoopTimestamp()} [INFO] [${options.clientName}] Dispatching tool call '${name}' with args: ${JSON.stringify(cleanArgs)}...`,
+    logInfo(
+      options.clientName,
+      `Dispatching tool call '${name}' with args: ${JSON.stringify(cleanArgs)}...`,
     );
     const toolResult = await withTimeout(
       mcpClient.callTool({ name, arguments: cleanArgs }),
       MCP_TOOL_TIMEOUT_MS,
       `MCP tool call to '${name}' on client '${options.clientName}' timed out after ${MCP_TOOL_TIMEOUT_MS}ms`,
     );
-    console.log(
-      `${getLoopTimestamp()} [INFO] [${options.clientName}] Tool call '${name}' returned with status.`,
-    );
+    logInfo(options.clientName, `Tool call '${name}' returned with status.`);
     return {
       result: { result: (toolResult as McpToolResult).content },
       hadError: !isMcpToolSuccess(toolResult as McpToolResult),
@@ -644,9 +674,7 @@ export async function runSafeDocxLoop(
   scenarioId: string,
   taskDescription: string,
 ): Promise<LoopResult> {
-  console.log(
-    `${getLoopTimestamp()} [INFO] [Safe Docx Loop] Initializing loop session for scenario '${scenarioId}'...`,
-  );
+  logInfo("Safe Docx Loop", `Initializing loop session for scenario '${scenarioId}'...`);
 
   cleanTempDirOnStartup();
 
@@ -728,9 +756,7 @@ export async function runAdeuLoop(
   scenarioId: string,
   taskDescription: string,
 ): Promise<LoopResult> {
-  console.log(
-    `${getLoopTimestamp()} [INFO] [Adeu Loop] Initializing loop session for scenario '${scenarioId}'...`,
-  );
+  logInfo("Adeu Loop", `Initializing loop session for scenario '${scenarioId}'...`);
 
   cleanTempDirOnStartup();
 
