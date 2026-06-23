@@ -246,6 +246,20 @@ export async function runLiveBenchmark() {
                   // ignore
                 }
               }
+              const sessionDpaPath = path.join(
+                path.dirname(loopResTempFilePath),
+                "dpa-module.docx",
+              );
+              if (fs.existsSync(sessionDpaPath)) {
+                try {
+                  console.log(
+                    `${getTimestamp()} [INFO] Cleaning up companion temporary DPA file: ${sessionDpaPath}`,
+                  );
+                  fs.unlinkSync(sessionDpaPath);
+                } catch {
+                  // ignore
+                }
+              }
             }
           }
 

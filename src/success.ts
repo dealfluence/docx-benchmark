@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { DocumentObject, DocumentMapper } from "@adeu/core";
 
 export async function checkScenarioSuccess(
@@ -124,7 +125,10 @@ export async function checkScenarioSuccess(
     case "multi-file-assembly": {
       // Success Criteria: Verify both CSA and DPA contain matching Wayne Enterprises and date June 22, 2026.
       if (!tempFilePath) return false;
-      const tempDpaPath = tempFilePath.replace(".docx", "_dpa.docx");
+      let tempDpaPath = tempFilePath.replace(".docx", "_dpa.docx");
+      if (!fs.existsSync(tempDpaPath)) {
+        tempDpaPath = path.join(path.dirname(tempFilePath), "dpa-module.docx");
+      }
       if (!fs.existsSync(tempDpaPath)) return false;
 
       try {
