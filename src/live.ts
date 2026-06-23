@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { DocumentObject } from "@adeu/core";
 import dotenv from "dotenv";
 
@@ -75,7 +75,7 @@ export async function runLiveBenchmark() {
   const clients = [
     {
       provider: "Gemini",
-      client: new GoogleGenerativeAI(geminiKey),
+      client: new GoogleGenAI({ apiKey: geminiKey }),
       model: geminiModel,
     },
   ];
@@ -144,7 +144,7 @@ export async function runLiveBenchmark() {
                 `${getTimestamp()} [INFO] Executing runSafeDocxLoop with task: "${fullTaskDescription.replace(/\n/g, " ")}"`,
               );
               const loopRes = await runSafeDocxLoop(
-                client as GoogleGenerativeAI,
+                client as GoogleGenAI,
                 model,
                 scenarioDocPath,
                 scenario.id,
@@ -171,7 +171,7 @@ export async function runLiveBenchmark() {
                 `${getTimestamp()} [INFO] Executing runAdeuLoop with task: "${fullTaskDescription.replace(/\n/g, " ")}"`,
               );
               const loopRes = await runAdeuLoop(
-                client as GoogleGenerativeAI,
+                client as GoogleGenAI,
                 model,
                 scenarioDocPath,
                 scenario.id,

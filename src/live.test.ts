@@ -92,33 +92,28 @@ describe("F4 Guard Test: Token Summing", () => {
   it("F4: Token summing across agentic conversation turns", async () => {
     const docPath = getGoldenDocxPath();
     const mockModel = {
+      countTokens: async () => ({ totalTokens: 100 }),
       generateContent: (() => {
         let turn = 0;
         return async () => {
           turn++;
           if (turn === 1) {
             return {
-              response: {
-                usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10 },
-                candidates: [
-                  { content: { parts: [{ functionCall: { name: "save", args: {} } }] } },
-                ],
-                functionCalls: () => [{ name: "save", args: {} }],
-              },
+              usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10 },
+              candidates: [{ content: { parts: [{ functionCall: { name: "save", args: {} } }] } }],
+              functionCalls: [{ name: "save", args: {} }],
             };
           } else {
             return {
-              response: {
-                usageMetadata: { promptTokenCount: 150, candidatesTokenCount: 20 },
-                candidates: [],
-                functionCalls: () => [],
-              },
+              usageMetadata: { promptTokenCount: 150, candidatesTokenCount: 20 },
+              candidates: [],
+              functionCalls: [],
             };
           }
         };
       })(),
     };
-    const mockGemini = { getGenerativeModel: () => mockModel } as any;
+    const mockGemini = { models: mockModel } as any;
 
     const loopRes = await runSafeDocxLoop(
       mockGemini,

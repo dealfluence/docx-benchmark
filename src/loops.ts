@@ -2,12 +2,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { performance } from "node:perf_hooks";
 import {
-  GoogleGenerativeAI,
+  GoogleGenAI,
   Content,
   FunctionDeclaration,
   Part,
-  SchemaType,
-} from "@google/generative-ai";
+  Type,
+  GenerateContentResponse,
+} from "@google/genai";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DocumentObject } from "@adeu/core";
@@ -38,7 +39,7 @@ export interface LoopResult {
 }
 
 export interface UnifiedLoopConfig {
-  gemini: GoogleGenerativeAI;
+  gemini: GoogleGenAI;
   modelName: string;
   systemPrompt: string;
   maxTurns: number;
@@ -63,10 +64,10 @@ export const COMPLETE_TASK_TOOL: FunctionDeclaration = {
   description:
     "Call this tool to finalize your draft, verify modifications, and submit the document for review once you are certain all edits are completed, verified, and successfully saved.",
   parameters: {
-    type: SchemaType.OBJECT,
+    type: Type.OBJECT,
     properties: {
       summary: {
-        type: SchemaType.STRING,
+        type: Type.STRING,
         description:
           "A brief, 1-sentence summary of the exact modifications applied to complete the task.",
       },
@@ -74,6 +75,60 @@ export const COMPLETE_TASK_TOOL: FunctionDeclaration = {
     required: ["summary"],
   },
 };
+
+async function generateContentWithRetry(
+  gemini: GoogleGenAI,
+  modelName: string,
+  contents: Content[],
+  systemPrompt: string,
+  tools: FunctionDeclaration[],
+  maxRetries = 3,
+): Promise<GenerateContentResponse> {
+  let attempt = 0;
+  let delay = 2000;
+
+  while (attempt < maxRetries) {
+    try {
+      const response = await withTimeout(
+        gemini.models.generateContent({
+          model: modelName,
+          contents,
+          config: {
+            systemInstruction: systemPrompt,
+            tools: tools.length > 0 ? [{ functionDeclarations: tools }] : undefined,
+          },
+        }),
+        GEMINI_TIMEOUT_MS,
+        `Gemini API call timed out after ${GEMINI_TIMEOUT_MS}ms`,
+      );
+      return response;
+    } catch (err: unknown) {
+      attempt++;
+      const errorObj = err as Record<string, unknown> | null;
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const isAbort =
+        err instanceof Error &&
+        (err.name === "AbortError" ||
+          errorMessage.includes("aborted") ||
+          errorMessage.includes("timed out"));
+      const isRateLimit = errorObj?.status === 429 || errorMessage.includes("429");
+      const isServerError =
+        (typeof errorObj?.status === "number" && errorObj.status >= 500) ||
+        errorMessage.includes("500");
+
+      if (attempt >= maxRetries || (!isAbort && !isRateLimit && !isServerError)) {
+        throw err;
+      }
+
+      console.warn(
+        `[${new Date().toISOString()}] [WARNING] generateContent call failed on attempt ${attempt}/${maxRetries} (Error: ${errorMessage}). Retrying in ${delay}ms...`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay *= 2;
+    }
+  }
+  throw new Error("generateContent failed after maximum retries");
+}
 
 export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<LoopResult> {
   const {
@@ -90,21 +145,13 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
   } = config;
 
   console.log(
-    `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Configuring model client: ${modelName}`,
-  );
-  const modelInstance = gemini.getGenerativeModel(
-    {
-      model: modelName,
-      generationConfig: { temperature: 0.0 },
-      tools: tools.length > 0 ? [{ functionDeclarations: tools }] : undefined,
-    },
-    { timeout: GEMINI_TIMEOUT_MS },
+    `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Initializing model client: ${modelName}`,
   );
 
   const contents: Content[] = [
     {
       role: "user",
-      parts: [{ text: systemPrompt }],
+      parts: [{ text: "Please analyze the loaded document and proceed with the specified task." }],
     },
   ];
 
@@ -122,17 +169,22 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
   if (tools.length > 0) {
     try {
       console.log(
-        `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimating tool schema token footprint...`,
+        `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimating tool schema token footprint using modern client...`,
       );
-      const modelNoTools = gemini.getGenerativeModel({ model: modelName });
-      const modelWithTools = gemini.getGenerativeModel({
-        model: modelName,
-        tools: [{ functionDeclarations: tools }],
-      });
       const testContent = [{ role: "user", parts: [{ text: "hello" }] }];
-      const countNoTools = await modelNoTools.countTokens({ contents: testContent });
-      const countWithTools = await modelWithTools.countTokens({ contents: testContent });
-      schemaTokensPerTurn = Math.max(0, countWithTools.totalTokens - countNoTools.totalTokens);
+      const countNoTools = await gemini.models.countTokens({
+        model: modelName,
+        contents: testContent,
+      });
+      const countWithTools = await gemini.models.countTokens({
+        model: modelName,
+        contents: testContent,
+        config: { tools: [{ functionDeclarations: tools }] },
+      });
+      schemaTokensPerTurn = Math.max(
+        0,
+        (countWithTools.totalTokens || 0) - (countNoTools.totalTokens || 0),
+      );
       console.log(
         `${getLoopTimestamp()} [INFO] [${loopName || "Loop"}] Estimated Schema Tokens per Turn: ${schemaTokensPerTurn}`,
       );
@@ -158,12 +210,14 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
       }
 
       console.log(
-        `${getLoopTimestamp()} [INFO] ${prefix} Calling generateContent... (Timeout configured: ${GEMINI_TIMEOUT_MS}ms)`,
+        `${getLoopTimestamp()} [INFO] ${prefix} Dispatching API call (timeout: ${GEMINI_TIMEOUT_MS}ms)...`,
       );
-      const geminiResponse = await withTimeout(
-        modelInstance.generateContent({ contents }),
-        GEMINI_TIMEOUT_MS,
-        `Gemini API call timed out after ${GEMINI_TIMEOUT_MS}ms`,
+      const geminiResponse = await generateContentWithRetry(
+        gemini,
+        modelName,
+        contents,
+        systemPrompt,
+        tools,
       ).catch((err) => {
         console.error(
           `${getLoopTimestamp()} \x1b[31m[ERROR] ${prefix} generateContent failed or was aborted!\x1b[0m`,
@@ -175,9 +229,8 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
         `${getLoopTimestamp()} [INFO] ${prefix} generateContent call returned successfully.`,
       );
 
-      const promptTokensThisTurn = geminiResponse.response.usageMetadata?.promptTokenCount || 0;
-      const candidatesTokensThisTurn =
-        geminiResponse.response.usageMetadata?.candidatesTokenCount || 0;
+      const promptTokensThisTurn = geminiResponse.usageMetadata?.promptTokenCount || 0;
+      const candidatesTokensThisTurn = geminiResponse.usageMetadata?.candidatesTokenCount || 0;
 
       tokensIn += promptTokensThisTurn;
       tokensOut += candidatesTokensThisTurn;
@@ -191,8 +244,15 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
       newContentTokens += nTokens;
       historyAccumulated = hTokens + nTokens + candidatesTokensThisTurn;
 
-      const parts = geminiResponse.response.candidates?.[0]?.content?.parts || [];
-      const functionCalls = geminiResponse.response.functionCalls() || [];
+      console.log(
+        `${getLoopTimestamp()} [INFO] ${prefix} Turn Metrics: [Tokens In: ${promptTokensThisTurn} (Schema: ${sTokens}, History: ${hTokens}, New Content: ${nTokens}) | Tokens Out: ${candidatesTokensThisTurn}]`,
+      );
+      console.log(
+        `${getLoopTimestamp()} [INFO] ${prefix} Cumulative Totals: [Tokens In: ${tokensIn} | Tokens Out: ${tokensOut} | Total: ${tokensIn + tokensOut}]`,
+      );
+
+      const parts = geminiResponse.candidates?.[0]?.content?.parts || [];
+      const functionCalls = geminiResponse.functionCalls || [];
 
       if (isVerbose) {
         console.log(
@@ -216,8 +276,15 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
       let shouldExitSucceeded = false;
 
       for (const fc of functionCalls) {
+        if (!fc.name) {
+          console.warn(
+            `${getLoopTimestamp()} [WARNING] ${prefix} Skipping anonymous or invalid function call.`,
+          );
+          continue;
+        }
+        const toolName = fc.name;
         try {
-          if (fc.name === "complete_task") {
+          if (toolName === "complete_task") {
             completeTaskCalls++;
             console.log(
               `${getLoopTimestamp()} [INFO] ${prefix} [complete_task] Intercepting task submission. Checking validation gate...`,
@@ -231,7 +298,7 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
               turnsToSuccess = turn;
               shouldExitSucceeded = true;
               functionResponses.push({
-                name: fc.name,
+                name: toolName,
                 response: {
                   success: true,
                   message: "Submission accepted. All validation checks passed.",
@@ -243,7 +310,7 @@ export async function runUnifiedAgenticLoop(config: UnifiedLoopConfig): Promise<
               );
               currentTurnHadError = true;
               functionResponses.push({
-                name: fc.name,
+                name: toolName,
                 response: {
                   success: false,
                   error:
@@ -474,7 +541,7 @@ export function makeMcpToolExecutor(
 }
 
 export async function runSafeDocxLoop(
-  gemini: GoogleGenerativeAI,
+  gemini: GoogleGenAI,
   modelName: string,
   docPath: string,
   scenarioId: string,
@@ -552,7 +619,7 @@ CRITICAL INSTRUCTIONS FOR SUBMISSION:
 }
 
 export async function runAdeuLoop(
-  gemini: GoogleGenerativeAI,
+  gemini: GoogleGenAI,
   modelName: string,
   docPath: string,
   scenarioId: string,

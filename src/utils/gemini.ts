@@ -1,4 +1,4 @@
-import { SchemaType } from "@google/generative-ai";
+import { Type } from "@google/genai";
 import { z } from "zod";
 import dotenv from "dotenv";
 
@@ -52,7 +52,7 @@ export const DocumentChangeSchema = z.union([
 export const AdeuOutputSchema = z.array(DocumentChangeSchema);
 
 export interface Schema {
-  type?: string | SchemaType;
+  type?: string | Type;
   $schema?: string;
   additionalProperties?: boolean;
   anyOf?: Schema[];
@@ -64,10 +64,8 @@ export interface Schema {
   enum?: string[];
 }
 
-export function mapSchemaType(type: string): SchemaType {
-  return (
-    (SchemaType as unknown as Record<string, SchemaType>)[type.toUpperCase()] || SchemaType.STRING
-  );
+export function mapSchemaType(type: string): Type {
+  return (Type as unknown as Record<string, Type>)[type.toUpperCase()] || Type.STRING;
 }
 
 /**
@@ -133,8 +131,8 @@ export function cleanSchema(schema: Schema | undefined): Schema | undefined {
   }
 
   // Supply default items schema for array properties that do not have them
-  if (res.type === SchemaType.ARRAY && !res.items) {
-    res.items = { type: SchemaType.STRING };
+  if (res.type === Type.ARRAY && !res.items) {
+    res.items = { type: Type.STRING };
   }
 
   return res;
