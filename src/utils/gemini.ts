@@ -130,9 +130,20 @@ export function cleanSchema(schema: Schema | undefined): Schema | undefined {
     res.items = cleanSchema(schema.items);
   }
 
-  // Supply default items schema for array properties that do not have them
-  if (res.type === Type.ARRAY && !res.items) {
-    res.items = { type: Type.STRING };
+  // Double-Serialization Guard: Explicitly declare array item parameters as structured
+  // Type.OBJECT schemas when properties are present, preventing Gemini from falling back
+  // to stringified JSON arrays during compilation.
+  if (res.type === Type.ARRAY) {
+    if (res.items) {
+      if (res.items.properties || res.items.type === "object" || res.items.type === Type.OBJECT) {
+        res.items.type = Type.OBJECT;
+        if (!res.items.properties) {
+          res.items.properties = {};
+        }
+      }
+    } else {
+      res.items = { type: Type.STRING };
+    }
   }
 
   return res;
