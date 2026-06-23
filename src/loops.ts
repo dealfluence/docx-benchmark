@@ -94,7 +94,7 @@ export function logError(prefix: string, message: string, err?: unknown) {
   }
 }
 
-export const MAX_TURNS = 20;
+export const MAX_TURNS = 40;
 
 let tempDirCleaned = false;
 
@@ -656,7 +656,6 @@ export async function runSafeDocxLoop(
     "@usejunior/safe-docx",
     "benchmark-client",
   );
-  const geminiTools = [...mapToGeminiTools(mcpTools), COMPLETE_TASK_TOOL];
 
   const systemPrompt = `You are an expert contract editor editing Microsoft Word documents (.docx) using the provided Safe Docx MCP tools.
 
@@ -681,7 +680,7 @@ CRITICAL INSTRUCTIONS FOR SUBMISSION:
     modelName,
     systemPrompt,
     maxTurns: MAX_TURNS,
-    tools: geminiTools,
+    tools: [...mapToGeminiTools(mcpTools), COMPLETE_TASK_TOOL],
     loopName: "Safe Docx Loop",
     executeTool: makeMcpToolExecutor(mcpClient, sessionDir, {
       forceSaveOverwrite: true,
@@ -740,7 +739,6 @@ export async function runAdeuLoop(
     "adeu-benchmark-client",
     ["--scope", "docx"],
   );
-  const geminiTools = [...mapToGeminiTools(mcpTools), COMPLETE_TASK_TOOL];
 
   const systemPrompt = `You are an expert contract editor editing Microsoft Word documents (.docx) using Adeu Virtual DOM.
 
@@ -766,7 +764,7 @@ CRITICAL INSTRUCTIONS FOR SUBMISSION:
     modelName,
     systemPrompt,
     maxTurns: MAX_TURNS,
-    tools: geminiTools,
+    tools: [...mapToGeminiTools(mcpTools), COMPLETE_TASK_TOOL],
     loopName: "Adeu Loop",
     executeTool: makeMcpToolExecutor(mcpClient, sessionDir, {
       forceSaveOverwrite: false,
