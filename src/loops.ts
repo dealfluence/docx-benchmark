@@ -56,7 +56,7 @@ export interface LoopStats {
   success: boolean;
 }
 
-export interface UnifiedLoopConfig {
+export interface LoopConfig {
   gemini: GoogleGenAI;
   modelName: string;
   systemPrompt: string;
@@ -224,7 +224,7 @@ async function generateContentWithRetry(
   throw new Error("generateContent failed after maximum retries");
 }
 
-export function initLoopStats(): LoopStats {
+export function initLoopStats(config: LoopConfig): LoopStats {
   return {
     tokensIn: 0,
     tokensOut: 0,
@@ -233,7 +233,7 @@ export function initLoopStats(): LoopStats {
     newContentTokens: 0,
     historyAccumulated: 0,
     roundTrips: 0,
-    turnsToSuccess: 0,
+    turnsToSuccess: config.maxTurns,
     errorTurns: 0,
     recoveryTurns: 0,
     completeTaskCalls: 0,
@@ -244,10 +244,9 @@ export function initLoopStats(): LoopStats {
 
 export async function executeTurn(
   turn: number,
-  config: UnifiedLoopConfig,
+  config: LoopConfig,
   contents: Content[],
   stats: LoopStats,
-  schemaTokensPerTurn: number,
 ): Promise<{ shouldBreak: boolean }> {
   const prefix = config.loopName ? `${config.loopName} Turn ${turn}` : `Loop Turn ${turn}`;
   const isVerbose = process.argv.includes("--verbose");
@@ -279,7 +278,7 @@ export async function executeTurn(
   stats.tokensIn += promptTokensThisTurn;
   stats.tokensOut += candidatesTokensThisTurn;
 
-  const sTokens = Math.min(schemaTokensPerTurn, promptTokensThisTurn);
+  const sTokens = promptTokensThisTurn;
   const hTokens = Math.min(stats.historyAccumulated, promptTokensThisTurn - sTokens);
   const nTokens = promptTokensThisTurn - sTokens - hTokens;
 
@@ -346,10 +345,8 @@ export async function executeTurn(
   return { shouldBreak: shouldExitSucceeded };
 }
 
-export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopResult> {
-  const { gemini, modelName, maxTurns, tools, getFinalBuffer, cleanup, loopName } = config;
-
-  logInfo(loopName || "Loop", `Initializing model client: ${modelName}`);
+export async function runAgenticLoop(config: LoopConfig): Promise<LoopResult> {
+  logInfo(config.loopName || "Loop", `Initializing model client: ${config.modelName}`);
 
   const contents: Content[] = [
     {
@@ -358,43 +355,31 @@ export async function runAgenticLoop(config: UnifiedLoopConfig): Promise<LoopRes
     },
   ];
 
-  const stats = initLoopStats();
-
-  const schemaTokensPerTurn: number =
-    tools.length > 0 ? await estimateSchemaTokensPerTurn(loopName, gemini, modelName, tools) : 0;
+  const stats = initLoopStats(config);
 
   let finalBuffer: Buffer | null = null;
 
   try {
-    for (let turn = 1; turn <= maxTurns; turn++) {
-      const { shouldBreak } = await executeTurn(turn, config, contents, stats, schemaTokensPerTurn);
-      if (shouldBreak) {
+    for (let turn = 1; turn <= config.maxTurns; turn++) {
+      if ((await executeTurn(turn, config, contents, stats)).shouldBreak) {
         break;
       }
     }
   } finally {
     try {
-      finalBuffer = await getFinalBuffer();
+      finalBuffer = await config.getFinalBuffer();
     } catch {
       // ignore
     }
-    if (cleanup) await cleanup();
+    if (config.cleanup) await config.cleanup();
   }
 
   const recoveryRate = stats.errorTurns > 0 ? stats.recoveryTurns / stats.errorTurns : 0;
 
   return {
-    tokensIn: stats.tokensIn,
-    tokensOut: stats.tokensOut,
-    roundTrips: stats.roundTrips,
-    turnsToSuccess: stats.success ? stats.turnsToSuccess : maxTurns,
     recoveryRate,
     finalBuffer: finalBuffer || Buffer.alloc(0),
-    success: stats.success,
-    schemaTokens: stats.schemaTokens,
-    historyTokens: stats.historyTokens,
-    newContentTokens: stats.newContentTokens,
-    completeTaskCalls: stats.completeTaskCalls,
+    ...stats,
   };
 }
 
@@ -533,31 +518,6 @@ async function handleCompleteTaskCall(
     };
   }
   return { shouldExitSucceeded, currentTurnHadError, functionResponse };
-}
-
-async function estimateSchemaTokensPerTurn(
-  loopName: string | undefined,
-  gemini: GoogleGenAI,
-  modelName: string,
-  tools: FunctionDeclaration[],
-) {
-  logInfo(loopName || "Loop", `Estimating tool schema token footprint using modern client...`);
-  const testContent = [{ role: "user", parts: [{ text: "hello" }] }];
-  const countNoTools = await gemini.models.countTokens({
-    model: modelName,
-    contents: testContent,
-  });
-  const countWithTools = await gemini.models.countTokens({
-    model: modelName,
-    contents: testContent,
-    config: { tools: [{ functionDeclarations: tools }] },
-  });
-  const schemaTokensPerTurn = Math.max(
-    0,
-    (countWithTools.totalTokens || 0) - (countNoTools.totalTokens || 0),
-  );
-  logInfo(loopName || "Loop", `Estimated Schema Tokens per Turn: ${schemaTokensPerTurn}`);
-  return schemaTokensPerTurn;
 }
 
 export async function connectMcpClient(
