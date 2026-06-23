@@ -59,6 +59,38 @@ const getLoopTimestamp = () => `[${new Date().toISOString()}]`;
 
 export const MAX_TURNS = 20;
 
+let tempDirCleaned = false;
+
+/**
+ * Cleans the temporary directory on startup, deleting only stale session folders
+ * older than 10 seconds to prevent race conditions during parallel test runs.
+ */
+export function cleanTempDirOnStartup() {
+  if (tempDirCleaned) return;
+  tempDirCleaned = true;
+  const tempDir = getTempDirPath();
+  try {
+    if (fs.existsSync(tempDir)) {
+      const entries = fs.readdirSync(tempDir);
+      const now = Date.now();
+      for (const entry of entries) {
+        const fullPath = path.join(tempDir, entry);
+        const stats = fs.statSync(fullPath);
+        if (now - stats.mtimeMs > 10000) {
+          fs.rmSync(fullPath, { recursive: true, force: true });
+        }
+      }
+      console.log(
+        `${getLoopTimestamp()} [INFO] Cleaned stale session directories under: ${tempDir}`,
+      );
+    } else {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+  } catch (err) {
+    console.warn(`${getLoopTimestamp()} [WARNING] Failed to clean temp dir: ${err}`);
+  }
+}
+
 export const COMPLETE_TASK_TOOL: FunctionDeclaration = {
   name: "complete_task",
   description:
@@ -472,32 +504,26 @@ export const mapToGeminiTools = (tools: McpTool[]): FunctionDeclaration[] =>
     parameters: cleanSchema(t.inputSchema) as FunctionDeclaration["parameters"],
   }));
 
-export function bindArgsToTempPath(
+/**
+ * Universal Path Isolation Guard: Automatically translates any file path or relative
+ * filename argument pointing to a .docx file so that it resolves within our isolated session folder,
+ * guaranteeing complete safety for the master baseline fixtures.
+ */
+export function resolveArgsToSessionDir(
   args: Record<string, unknown>,
-  properties: Record<string, unknown>,
-  tempFilePath: string,
+  sessionDir: string,
 ): Record<string, unknown> {
-  const cleanArgs = { ...args };
-  for (const key of [
-    "file_path",
-    "path",
-    "save_to_local_path",
-    "original_docx_path",
-    "output_path",
-    "docx_path",
-    "original_path",
-    "modified_path",
-  ]) {
-    if (key in properties) {
-      const origValue = String(args[key] || "");
-      if (origValue.toLowerCase().includes("dpa")) {
-        cleanArgs[key] = tempFilePath.replace(".docx", "_dpa.docx");
-      } else {
-        cleanArgs[key] = tempFilePath;
+  const resolvedArgs = { ...args };
+  for (const key of Object.keys(resolvedArgs)) {
+    const val = resolvedArgs[key];
+    if (typeof val === "string") {
+      if (val.toLowerCase().endsWith(".docx")) {
+        const baseName = path.basename(val);
+        resolvedArgs[key] = path.join(sessionDir, baseName).replace(/\\/g, "/");
       }
     }
   }
-  return cleanArgs;
+  return resolvedArgs;
 }
 
 export function isMcpToolSuccess(toolResult: McpToolResult): boolean {
@@ -509,21 +535,16 @@ export function isMcpToolSuccess(toolResult: McpToolResult): boolean {
 export function makeMcpToolExecutor(
   mcpClient: Client,
   mcpTools: McpTool[],
-  tempFilePath: string,
+  sessionDir: string,
   options: { forceSaveOverwrite?: boolean; clientName: string },
 ) {
   return async (name: string, args: Record<string, unknown>) => {
-    const toolDef = mcpTools.find((t) => t.name === name);
-    const cleanArgs = bindArgsToTempPath(
-      args,
-      (toolDef?.inputSchema?.properties as Record<string, unknown>) || {},
-      tempFilePath,
-    );
+    const cleanArgs = resolveArgsToSessionDir(args, sessionDir);
     if (options.forceSaveOverwrite && name === "save") {
       cleanArgs.allow_overwrite = true;
     }
     console.log(
-      `${getLoopTimestamp()} [INFO] [${options.clientName}] Dispatching tool call '${name}'...`,
+      `${getLoopTimestamp()} [INFO] [${options.clientName}] Dispatching tool call '${name}' with args: ${JSON.stringify(cleanArgs)}...`,
     );
     const toolResult = await withTimeout(
       mcpClient.callTool({ name, arguments: cleanArgs }),
@@ -551,18 +572,24 @@ export async function runSafeDocxLoop(
     `${getLoopTimestamp()} [INFO] [Safe Docx Loop] Initializing loop session for scenario '${scenarioId}'...`,
   );
 
+  cleanTempDirOnStartup();
+
   const tempDir = getTempDirPath();
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-  const tempFilePath = path.join(tempDir, `temp_safe_docx_rep_${performance.now()}.docx`);
+  const sessionDir = path.join(
+    tempDir,
+    `session_${performance.now()}_${Math.random().toString(36).substring(2, 8)}`,
+  );
+  fs.mkdirSync(sessionDir, { recursive: true });
+
+  const docFileName = path.basename(docPath);
+  const tempFilePath = path.join(sessionDir, docFileName).replace(/\\/g, "/");
   fs.copyFileSync(docPath, tempFilePath);
 
   let tempDpaPath: string | undefined = undefined;
   if (scenarioId === "multi-file-assembly") {
-    tempDpaPath = tempFilePath.replace(".docx", "_dpa.docx");
     const dpaSourcePath = path.resolve(path.dirname(docPath), "dpa-module.docx");
     if (fs.existsSync(dpaSourcePath)) {
+      tempDpaPath = path.join(sessionDir, "dpa-module.docx").replace(/\\/g, "/");
       fs.copyFileSync(dpaSourcePath, tempDpaPath);
     }
   }
@@ -598,7 +625,7 @@ CRITICAL INSTRUCTIONS FOR SUBMISSION:
     maxTurns: MAX_TURNS,
     tools: geminiTools,
     loopName: "Safe Docx Loop",
-    executeTool: makeMcpToolExecutor(mcpClient, mcpTools, tempFilePath, {
+    executeTool: makeMcpToolExecutor(mcpClient, mcpTools, sessionDir, {
       forceSaveOverwrite: true,
       clientName: "Safe-Docx",
     }),
@@ -629,19 +656,25 @@ export async function runAdeuLoop(
     `${getLoopTimestamp()} [INFO] [Adeu Loop] Initializing loop session for scenario '${scenarioId}'...`,
   );
 
+  cleanTempDirOnStartup();
+
   const tempDir = getTempDirPath();
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-  const tempFilePath = path.join(tempDir, `temp_adeu_rep_${performance.now()}.docx`);
+  const sessionDir = path.join(
+    tempDir,
+    `session_${performance.now()}_${Math.random().toString(36).substring(2, 8)}`,
+  );
+  fs.mkdirSync(sessionDir, { recursive: true });
+
   const docBuffer = fs.readFileSync(docPath);
+  const docFileName = path.basename(docPath);
+  const tempFilePath = path.join(sessionDir, docFileName).replace(/\\/g, "/");
   fs.writeFileSync(tempFilePath, docBuffer);
 
   let tempDpaPath: string | undefined = undefined;
   if (scenarioId === "multi-file-assembly") {
-    tempDpaPath = tempFilePath.replace(".docx", "_dpa.docx");
     const dpaSourcePath = path.resolve(path.dirname(docPath), "dpa-module.docx");
     if (fs.existsSync(dpaSourcePath)) {
+      tempDpaPath = path.join(sessionDir, "dpa-module.docx").replace(/\\/g, "/");
       fs.copyFileSync(dpaSourcePath, tempDpaPath);
     }
   }
@@ -678,7 +711,7 @@ CRITICAL INSTRUCTIONS FOR SUBMISSION:
     maxTurns: MAX_TURNS,
     tools: geminiTools,
     loopName: "Adeu Loop",
-    executeTool: makeMcpToolExecutor(mcpClient, mcpTools, tempFilePath, {
+    executeTool: makeMcpToolExecutor(mcpClient, mcpTools, sessionDir, {
       forceSaveOverwrite: false,
       clientName: "Adeu-MCP",
     }),
