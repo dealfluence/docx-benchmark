@@ -67,7 +67,7 @@ export interface LoopConfig {
     args: Record<string, unknown>,
     turn: number,
   ) => Promise<{ result?: unknown; error?: string; hadError: boolean }>;
-  checkSuccess: (turn: number) => Promise<boolean>;
+  checkSuccess: (turn: number, finalFilenames?: string[]) => Promise<boolean>;
   getFinalBuffer: () => Promise<Buffer>;
   cleanup?: () => Promise<void>;
   loopName?: string;
@@ -170,6 +170,12 @@ export const COMPLETE_TASK_TOOL: FunctionDeclaration = {
         type: Type.STRING,
         description:
           "A brief, 1-sentence summary of the exact modifications applied to complete the task.",
+      },
+      final_filenames: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description:
+          "The filename(s) or relative path(s) of the final, saved document(s) containing your completed edits (e.g., ['cloud-service-agreement_processed.docx', 'dpa-module_processed.docx'] or ['post-money-safe_processed.docx']). If not specified, defaults to the primary document filename.",
       },
     },
     required: ["summary"],
@@ -284,7 +290,7 @@ export async function executeTurn(
   stats.tokensOut += candidatesTokensThisTurn;
 
   const sTokens = promptTokensThisTurn;
-  const hTokens = Math.min(stats.historyAccumulated, promptTokensThisTurn - sTokens);
+  const hTokens = Math.min(stats.historyAccumulated, Math.max(0, promptTokensThisTurn - sTokens));
   const nTokens = promptTokensThisTurn - sTokens - hTokens;
 
   stats.schemaTokens += sTokens;
@@ -392,7 +398,7 @@ async function handleFunctionCalls(
   functionCalls: FunctionCall[],
   prefix: string,
   stats: LoopStats,
-  checkSuccess: (turn: number) => Promise<boolean>,
+  checkSuccess: (turn: number, finalFilenames?: string[]) => Promise<boolean>,
   turn: number,
   functionResponses: { name: string; response: Record<string, unknown> }[],
   executeTool: (
@@ -416,7 +422,14 @@ async function handleFunctionCalls(
     try {
       if (toolName === "complete_task") {
         stats.completeTaskCalls++;
-        const res = await handleCompleteTaskCall(prefix, checkSuccess, turn, stats, toolName);
+        const res = await handleCompleteTaskCall(
+          prefix,
+          checkSuccess,
+          turn,
+          stats,
+          toolName,
+          fc.args as Record<string, unknown>,
+        );
         shouldExitSucceeded = res.shouldExitSucceeded;
         if (res.currentTurnHadError) {
           currentTurnHadError = true;
@@ -475,17 +488,30 @@ async function handleFunctionCalls(
 
 async function handleCompleteTaskCall(
   prefix: string,
-  checkSuccess: (turn: number) => Promise<boolean>,
+  checkSuccess: (turn: number, finalFilenames?: string[]) => Promise<boolean>,
   turn: number,
   stats: LoopStats,
   toolName: string,
+  args?: Record<string, unknown>,
 ): Promise<{
   shouldExitSucceeded: boolean;
   currentTurnHadError: boolean;
   functionResponse: { name: string; response: Record<string, unknown> };
 }> {
   logInfo(prefix, `[complete_task] Intercepting task submission. Checking validation gate...`);
-  const isSuccessNow = await checkSuccess(turn);
+
+  let finalFilenames: string[] | undefined = undefined;
+  if (args?.final_filenames) {
+    if (Array.isArray(args.final_filenames)) {
+      finalFilenames = args.final_filenames.map(String);
+    } else if (typeof args.final_filenames === "string") {
+      finalFilenames = [args.final_filenames];
+    }
+  } else if (args?.final_filename) {
+    finalFilenames = [String(args.final_filename)];
+  }
+
+  const isSuccessNow = await checkSuccess(turn, finalFilenames);
   let shouldExitSucceeded = false;
   let currentTurnHadError = false;
   let functionResponse: { name: string; response: Record<string, unknown> };
@@ -671,10 +697,11 @@ Verify your changes are saved to the correct paths using the 'save' tool before 
 If the task requires adding review feedback or comments, use the appropriate comment tools to anchor your observations to the relevant nodes.
 
 CRITICAL INSTRUCTIONS FOR SUBMISSION:
-1. You MUST explicitly call the 'complete_task' tool to submit your work and finalize the task. Simply writing a final message in plain text will NOT complete the task.
+1. You MUST explicitly call the 'complete_task' tool to submit your work and finalize the task. If you saved your work to a custom filename (e.g., 'cloud-service-agreement_processed.docx'), pass that filename in the 'final_filenames' parameter. Simply writing a final message in plain text will NOT complete the task.
 2. If your submission fails the validation gate, you will receive structured linter feedback. Analyze the feedback, correct the document, and call 'complete_task' again once ready.`;
 
   const originalDoc = await DocumentObject.load(fs.readFileSync(docPath));
+  let resolvedFinalFilePath = tempFilePath;
 
   const result = await runAgenticLoop({
     gemini,
@@ -687,13 +714,41 @@ CRITICAL INSTRUCTIONS FOR SUBMISSION:
       forceSaveOverwrite: true,
       clientName: "Safe-Docx",
     }),
-    checkSuccess: async () => {
-      const currentBuffer = fs.readFileSync(tempFilePath);
+    checkSuccess: async (turn, finalFilenames) => {
+      let primaryPath = tempFilePath;
+      if (finalFilenames && finalFilenames.length > 0) {
+        for (const filename of finalFilenames) {
+          const base = path.basename(filename);
+          const resolvedPath = path.join(sessionDir, base).replace(/\\/g, "/");
+          if (!fs.existsSync(resolvedPath)) {
+            continue;
+          }
+          if (base.toLowerCase().includes("dpa") && base !== "dpa-module.docx") {
+            const stdDpaPath = path.join(sessionDir, "dpa-module.docx").replace(/\\/g, "/");
+            fs.copyFileSync(resolvedPath, stdDpaPath);
+          } else {
+            primaryPath = resolvedPath;
+          }
+        }
+      }
+      resolvedFinalFilePath = primaryPath;
+      if (!fs.existsSync(primaryPath)) {
+        logWarn(
+          "Safe Docx Loop",
+          `[complete_task] Primary final file does not exist: ${primaryPath}`,
+        );
+        return false;
+      }
+      const currentBuffer = fs.readFileSync(primaryPath);
       const currentDoc = await DocumentObject.load(currentBuffer);
-      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc, tempFilePath);
+      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc, primaryPath);
     },
     getFinalBuffer: async () => {
-      return fs.existsSync(tempFilePath) ? fs.readFileSync(tempFilePath) : fs.readFileSync(docPath);
+      return fs.existsSync(resolvedFinalFilePath)
+        ? fs.readFileSync(resolvedFinalFilePath)
+        : fs.existsSync(tempFilePath)
+          ? fs.readFileSync(tempFilePath)
+          : fs.readFileSync(docPath);
     },
     cleanup: async () => {
       await mcpClient.close();
@@ -753,12 +808,13 @@ Please observe the documents first, analyze the content, then perform modificati
 If the task requires adding review feedback or comments, attach comments to the appropriate targets.
 
 CRITICAL INSTRUCTIONS FOR SUBMISSION:
-1. Once you have verified that the text of your edits is present in the document, you MUST explicitly call the 'complete_task' tool to submit your work and finalize the task. Simply writing a final message in plain text will NOT complete the task.
+1. Once you have verified that the text of your edits is present in the document, you MUST explicitly call the 'complete_task' tool to submit your work and finalize the task. If you saved your work to a processed filename (e.g., 'post-money-safe_processed.docx'), pass that filename in the 'final_filenames' parameter of 'complete_task'. Simply writing a final message in plain text will NOT complete the task.
 2. The CriticMarkup tags (such as '{++' and '++}' for inserted text, or '{--' and '--}' for deleted text) represent the track changes of your edits. These are normal, expected, and correct.
 3. Even if the 'read_document' output shows complex tracked changes (such as headings or paragraph breaks marked as deleted, split, or inserted), DO NOT attempt to "clean up", "fix", accept, or reject these tracked changes. DO NOT make any further edits to improve formatting or structure.
 4. If your submission fails the validation gate, you will receive structured linter feedback. Analyze the feedback, correct the document, and call 'complete_task' again once ready.`;
 
   const originalDoc = await DocumentObject.load(docBuffer);
+  let resolvedFinalFilePath = tempFilePath;
 
   const result = await runAgenticLoop({
     gemini,
@@ -771,13 +827,38 @@ CRITICAL INSTRUCTIONS FOR SUBMISSION:
       forceSaveOverwrite: false,
       clientName: "Adeu-MCP",
     }),
-    checkSuccess: async () => {
-      const currentBuffer = fs.readFileSync(tempFilePath);
+    checkSuccess: async (turn, finalFilenames) => {
+      let primaryPath = tempFilePath;
+      if (finalFilenames && finalFilenames.length > 0) {
+        for (const filename of finalFilenames) {
+          const base = path.basename(filename);
+          const resolvedPath = path.join(sessionDir, base).replace(/\\/g, "/");
+          if (!fs.existsSync(resolvedPath)) {
+            continue;
+          }
+          if (base.toLowerCase().includes("dpa") && base !== "dpa-module.docx") {
+            const stdDpaPath = path.join(sessionDir, "dpa-module.docx").replace(/\\/g, "/");
+            fs.copyFileSync(resolvedPath, stdDpaPath);
+          } else {
+            primaryPath = resolvedPath;
+          }
+        }
+      }
+      resolvedFinalFilePath = primaryPath;
+      if (!fs.existsSync(primaryPath)) {
+        logWarn("Adeu Loop", `[complete_task] Primary final file does not exist: ${primaryPath}`);
+        return false;
+      }
+      const currentBuffer = fs.readFileSync(primaryPath);
       const currentDoc = await DocumentObject.load(currentBuffer);
-      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc, tempFilePath);
+      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc, primaryPath);
     },
     getFinalBuffer: async () => {
-      return fs.existsSync(tempFilePath) ? fs.readFileSync(tempFilePath) : docBuffer;
+      return fs.existsSync(resolvedFinalFilePath)
+        ? fs.readFileSync(resolvedFinalFilePath)
+        : fs.existsSync(tempFilePath)
+          ? fs.readFileSync(tempFilePath)
+          : docBuffer;
     },
     cleanup: async () => {
       await mcpClient.close();
