@@ -49,11 +49,11 @@ export const scenarios: Scenario[] = [
     id: "playbook-commenting",
     name: "Playbook-based Commenting (Late Payment Interest Cap)",
     description:
-      "Review the Cloud Service Agreement against a specific corporate playbook rule: 'Late payment interest cannot exceed 1.0% per month'. Locate the non-conforming late payment interest rate (which is currently 1.5% per month) and insert an OOXML margin comment anchored to that text run containing the playbook feedback.",
+      "Review the Model Services Contract against a specific corporate playbook rule: 'The interest rate for late payments must not refer to statutory rates under the Late Payment of Commercial Debts Act 1998. It must be explicitly capped at 2.0% above the Bank of England base rate per annum.' Locate the non-conforming late payment interest reference in the contract and insert an OOXML margin comment anchored to that text run containing the playbook feedback.",
     targetText: "",
     replacementText: "",
     isAgentic: true,
-    fixturePath: "fixtures/common-paper/cloud-service-agreement.docx",
+    fixturePath: "fixtures/uk-gov/model-services-contract.docx",
   },
   {
     id: "multi-file-assembly",

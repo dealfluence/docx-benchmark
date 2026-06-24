@@ -25,7 +25,7 @@ describe("scenarios v2", () => {
     const s4 = scenarios.find((s) => s.id === "playbook-commenting");
     expect(s4).toBeDefined();
     expect(s4?.isAgentic).toBe(true);
-    expect(s4?.fixturePath).toBe("fixtures/common-paper/cloud-service-agreement.docx");
+    expect(s4?.fixturePath).toBe("fixtures/uk-gov/model-services-contract.docx");
 
     const s5 = scenarios.find((s) => s.id === "multi-file-assembly");
     expect(s5).toBeDefined();

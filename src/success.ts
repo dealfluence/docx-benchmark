@@ -115,11 +115,15 @@ export async function checkScenarioSuccess(
       // Success Criteria: Inspect word/comments.xml to verify the late payment interest cap comment text is present.
       const commentsPart = modifiedDoc.pkg.parts.find((p) => p.partname.includes("comments"));
       const commentsXml = commentsPart ? String(commentsPart.blob).toLowerCase() : "";
-      const hasInterest =
-        commentsXml.includes("1.0%") ||
-        commentsXml.includes("interest") ||
-        commentsXml.includes("payment");
-      return hasInterest;
+      const hasInterest = commentsXml.includes("interest") || commentsXml.includes("payment");
+      const hasBoE =
+        commentsXml.includes("2%") ||
+        commentsXml.includes("2.0%") ||
+        commentsXml.includes("england") ||
+        commentsXml.includes("base rate") ||
+        commentsXml.includes("commercial debts") ||
+        commentsXml.includes("statutory");
+      return hasInterest && hasBoE;
     }
 
     case "multi-file-assembly": {

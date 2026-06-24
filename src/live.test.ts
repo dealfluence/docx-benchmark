@@ -190,7 +190,7 @@ describe("F6 Guard Test: Success Discriminates", () => {
     const passComment = await createStrippedDoc(buffer, "Plain text document content");
     passComment.pkg.parts.push({
       partname: "word/comments.xml",
-      blob: `<?xml version="1.0" encoding="UTF-8"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:comment w:id="1"><w:p><w:r><w:t>Late payment interest rate should be 1.0%.</w:t></w:r></w:p></w:comment></w:comments>`,
+      blob: `<?xml version="1.0" encoding="UTF-8"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:comment w:id="1"><w:p><w:r><w:t>Late payment interest rate should be capped at 2.0% above Bank of England base rate, not statutory.</w:t></w:r></w:p></w:comment></w:comments>`,
     } as any);
     const failComment = await createStrippedDoc(buffer, "Plain text document content");
     expect(await checkScenarioSuccess("playbook-commenting", originalDoc, passComment)).toBe(true);
