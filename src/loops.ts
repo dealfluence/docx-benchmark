@@ -563,7 +563,16 @@ export async function connectMcpClient(
     `${clientName} connection timed out after ${MCP_CONNECT_TIMEOUT_MS}ms`,
   );
   logInfo("", `Connection handshake completed with MCP Server '${clientName}'.`);
-
+  const clientWithHandshake = mcpClient as unknown as {
+    serverInfo?: { name: string; version: string };
+    initializeResult?: { serverInfo?: { name: string; version: string } };
+  };
+  const serverInfo =
+    clientWithHandshake.serverInfo || clientWithHandshake.initializeResult?.serverInfo;
+  logInfo(
+    "",
+    `MCP Server reported info: name="${serverInfo?.name || "unknown"}", version="${serverInfo?.version || "unknown"}"`,
+  );
   logInfo("", `Retrieving tool registrations from MCP Server '${clientName}'...`);
   const toolsResponse = await withTimeout(
     mcpClient.listTools(),
