@@ -563,16 +563,27 @@ export async function connectMcpClient(
     `${clientName} connection timed out after ${MCP_CONNECT_TIMEOUT_MS}ms`,
   );
   logInfo("", `Connection handshake completed with MCP Server '${clientName}'.`);
-  const clientWithHandshake = mcpClient as unknown as {
-    serverInfo?: { name: string; version: string };
-    initializeResult?: { serverInfo?: { name: string; version: string } };
-  };
-  const serverInfo =
-    clientWithHandshake.serverInfo || clientWithHandshake.initializeResult?.serverInfo;
-  logInfo(
-    "",
-    `MCP Server reported info: name="${serverInfo?.name || "unknown"}", version="${serverInfo?.version || "unknown"}"`,
-  );
+
+  const clientObj = mcpClient as unknown as Record<string, unknown>;
+  let serverName = "unknown";
+  let serverVersion = "unknown";
+
+  const rawVersion =
+    clientObj._serverVersion ||
+    clientObj.serverInfo ||
+    (typeof clientObj.getServerVersion === "function"
+      ? (clientObj.getServerVersion as () => unknown)()
+      : undefined);
+
+  if (rawVersion && typeof rawVersion === "object") {
+    const typedVersion = rawVersion as { name?: string; version?: string };
+    serverName = typedVersion.name || "unknown";
+    serverVersion = typedVersion.version || "unknown";
+  } else if (typeof rawVersion === "string") {
+    serverVersion = rawVersion;
+  }
+
+  logInfo("", `MCP Server reported info: name="${serverName}", version="${serverVersion}"`);
   logInfo("", `Retrieving tool registrations from MCP Server '${clientName}'...`);
   const toolsResponse = await withTimeout(
     mcpClient.listTools(),
