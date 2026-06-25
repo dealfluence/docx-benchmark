@@ -19,7 +19,7 @@ export const scenarios: Scenario[] = [
     id: "form-fill",
     name: "Form Fill (SAFE Deal Data)",
     description:
-      "Locate bracketed placeholders or blank fields for 'Company Name', 'Investor Name'/'Founder Name', and 'Valuation Cap' in the Post-Money SAFE template and populate them with specific deal data: Company Name is 'Acme Corporate Technologies, Inc.', Investor Name is 'Jane Founder', and Valuation Cap is '$15,000,000'.",
+      "Populate the placeholders in the Post-Money SAFE template with this deal data: the Company Name is 'Acme Corporate Technologies, Inc.', the Investor Name is 'Jane Founder', and the Post-Money Valuation Cap is '$15,000,000'. Leave no unfilled placeholder remaining.",
     targetText: "",
     replacementText: "",
     isAgentic: true,
@@ -29,7 +29,7 @@ export const scenarios: Scenario[] = [
     id: "party-swap",
     name: "Contract Clone & Party Swap (Investment Agreement)",
     description:
-      "Globally swap contracting party details (change '[COMPANY NAME]' to 'Wayne Enterprises, Inc.' and '[PURCHASER NAME]' to 'Bruce Wayne') consistently throughout the Series Seed Investment Agreement, updating definitions and signature blocks.",
+      "Globally swap contracting party details throughout the Series Seed Investment Agreement: change every occurrence of the placeholder '[COMPANY NAME]' to 'Wayne Enterprises, Inc.' and every occurrence of '[PURCHASER NAME]' to 'Bruce Wayne'. The swap must be applied consistently at all of places, leaving no placeholder behind.",
     targetText: "",
     replacementText: "",
     isAgentic: true,

@@ -159,7 +159,7 @@ describe("F6 Guard Test: Success Discriminates", () => {
   it("F6: party-swap evaluates dynamically and correctly", async () => {
     const passParty = await createStrippedDoc(
       buffer,
-      "Wayne Enterprises agrees to pay Bruce Wayne the sum.",
+      "Wayne Enterprises, Inc. Wayne Enterprises, Inc. Wayne Enterprises, Inc. agrees to pay Bruce Wayne and Bruce Wayne the sum.",
     );
     const failParty = await createStrippedDoc(
       buffer,
@@ -172,7 +172,7 @@ describe("F6 Guard Test: Success Discriminates", () => {
   it("F6: policy-checklist-review evaluates dynamically and correctly", async () => {
     const passPolicy = await createStrippedDoc(
       buffer,
-      `Checklist review results: { "governingLaw": "Delaware state laws", "liabilityCap": "General Cap", "standardTermsLink": "https://commonpaper.com/standards" }`,
+      `Checklist review results: { "governingLaw": "unspecified", "liabilityCap": "General Cap", "standardTermsLink": "https://commonpaper.com/standards" }`,
     );
     const failPolicy = await createStrippedDoc(
       buffer,
@@ -204,14 +204,14 @@ describe("F6 Guard Test: Success Discriminates", () => {
     // Create temporary DPA mock file
     const dpaDoc = await createStrippedDoc(
       buffer,
-      "Wayne Enterprises and June 22, 2026 dpa details",
+      "Wayne Enterprises, Inc. and June 22, 2026 dpa details",
     );
     const dpaExport = await dpaDoc.save();
     fs.writeFileSync(tempDpaPath, dpaExport);
 
     const passCsa = await createStrippedDoc(
       buffer,
-      "Wayne Enterprises and June 22, 2026 csa details",
+      "Wayne Enterprises, Inc. and June 22, 2026 csa details",
     );
 
     try {

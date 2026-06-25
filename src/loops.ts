@@ -106,6 +106,34 @@ export function logError(prefix: string, message: string, err?: unknown) {
 
 export const MAX_TURNS = 40;
 
+/**
+ * Builds the neutral, paradigm-symmetric system prompt. Both loops receive an
+ * identical skeleton differing only in the tool name and the document list, so
+ * neither paradigm gets tool-specific survival coaching. This measures true
+ * unguided capability and is defensible for a vendor-published benchmark.
+ */
+export function buildSystemPrompt(opts: {
+  toolDisplayName: string;
+  docFileName: string;
+  companionDpaName?: string;
+  taskDescription: string;
+}): string {
+  const { toolDisplayName, docFileName, companionDpaName, taskDescription } = opts;
+  return `You are an expert contract editor editing Microsoft Word documents (.docx) using the provided ${toolDisplayName} tools.
+
+Documents involved in this task:
+- Primary Document: "${docFileName}"
+${companionDpaName ? `- Companion DPA Document: "${companionDpaName}"` : ""}
+
+Your task is: ${taskDescription}
+
+Work through the task using the available tools. Inspect the document(s) before editing, apply the requested edits, and verify that the text of your edits is present and saved before finishing.
+
+CRITICAL INSTRUCTIONS FOR SUBMISSION:
+1. You MUST explicitly call the 'complete_task' tool to submit your work and finalize the task. If you saved your work to a different filename than the original (e.g., a "_processed.docx" variant), pass that filename in the 'final_filenames' parameter. Writing a final message in plain text will NOT complete the task.
+2. If your submission fails the validation gate, you will receive structured linter feedback. Analyze the feedback, correct the document, and call 'complete_task' again once ready.`;
+}
+
 let tempDirCleaned = false;
 
 /**
@@ -704,22 +732,12 @@ export async function runSafeDocxLoop(
     "benchmark-client",
   );
 
-  const systemPrompt = `You are an expert contract editor editing Microsoft Word documents (.docx) using the provided Safe Docx MCP tools.
-
-Documents involved in this task:
-- Primary Document: "${docFileName}"
-${tempDpaPath ? `- Companion DPA Document: "dpa-module.docx"` : ""}
-
-Your task is: ${taskDescription}
-
-You must be highly efficient and minimize the number of tool calls and conversation turns.
-Verify your changes are saved to the correct paths using the 'save' tool before stopping.
-If the task requires adding review feedback or comments, use the appropriate comment tools to anchor your observations to the relevant nodes.
-
-CRITICAL INSTRUCTIONS FOR SUBMISSION:
-1. You MUST explicitly call the 'complete_task' tool to submit your work and finalize the task. If you saved your work to a custom filename (e.g., 'cloud-service-agreement_processed.docx'), pass that filename in the 'final_filenames' parameter. Simply writing a final message in plain text will NOT complete the task.
-2. If your submission fails the validation gate, you will receive structured linter feedback. Analyze the feedback, correct the document, and call 'complete_task' again once ready.`;
-
+  const systemPrompt = buildSystemPrompt({
+    toolDisplayName: "Safe Docx MCP",
+    docFileName,
+    companionDpaName: tempDpaPath ? "dpa-module.docx" : undefined,
+    taskDescription,
+  });
   const originalDoc = await DocumentObject.load(fs.readFileSync(docPath));
   let resolvedFinalFilePath = tempFilePath;
 
@@ -816,23 +834,12 @@ export async function runAdeuLoop(
     ["--scope", "docx"],
   );
 
-  const systemPrompt = `You are an expert contract editor editing Microsoft Word documents (.docx) using Adeu Virtual DOM.
-
-Documents involved in this task:
-- Primary Document: "${docFileName}"
-${tempDpaPath ? `- Companion DPA Document: "dpa-module.docx"` : ""}
-
-Your task is: ${taskDescription}
-
-Please observe the documents first, analyze the content, then perform modifications using your batch processing capabilities.
-If the task requires adding review feedback or comments, attach comments to the appropriate targets.
-
-CRITICAL INSTRUCTIONS FOR SUBMISSION:
-1. Once you have verified that the text of your edits is present in the document, you MUST explicitly call the 'complete_task' tool to submit your work and finalize the task. If you saved your work to a processed filename (e.g., 'post-money-safe_processed.docx'), pass that filename in the 'final_filenames' parameter of 'complete_task'. Simply writing a final message in plain text will NOT complete the task.
-2. The CriticMarkup tags (such as '{++' and '++}' for inserted text, or '{--' and '--}' for deleted text) represent the track changes of your edits. These are normal, expected, and correct.
-3. Even if the 'read_document' output shows complex tracked changes (such as headings or paragraph breaks marked as deleted, split, or inserted), DO NOT attempt to "clean up", "fix", accept, or reject these tracked changes. DO NOT make any further edits to improve formatting or structure.
-4. If your submission fails the validation gate, you will receive structured linter feedback. Analyze the feedback, correct the document, and call 'complete_task' again once ready.`;
-
+  const systemPrompt = buildSystemPrompt({
+    toolDisplayName: "Adeu MCP",
+    docFileName,
+    companionDpaName: tempDpaPath ? "dpa-module.docx" : undefined,
+    taskDescription,
+  });
   const originalDoc = await DocumentObject.load(docBuffer);
   let resolvedFinalFilePath = tempFilePath;
 
