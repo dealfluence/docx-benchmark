@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as util from "node:util";
+import { getTrialContext, trialTag } from "./trial-context.js";
 
 let logFileStream: fs.WriteStream | null = null;
 let timestampedFileStream: fs.WriteStream | null = null;
@@ -99,6 +100,20 @@ export function setupFileLogging(options: FileLoggingOptions = {}) {
         };
       }
 
+      // Stamp every line with the active trial context so the shared .jsonl stays
+      // attributable even when parallel trials interleave. Explicit fields already
+      // present on the entry (e.g. a tool_step's own keys) are preserved.
+      const trialCtx = getTrialContext();
+      if (trialCtx) {
+        logObj = {
+          ...logObj,
+          trialId: logObj.trialId ?? trialCtx.trialId,
+          toolId: logObj.toolId ?? trialCtx.toolId,
+          scenario: logObj.scenario ?? trialCtx.scenario,
+          rep: logObj.rep ?? trialCtx.rep,
+        };
+      }
+
       const line = JSON.stringify(logObj) + "\n";
       if (logFileStream) logFileStream.write(line);
       if (timestampedFileStream) timestampedFileStream.write(line);
@@ -109,36 +124,45 @@ export function setupFileLogging(options: FileLoggingOptions = {}) {
     }
   };
 
+  // Prefix interleaved stdout with the active trial tag so a human can tell which
+  // parallel trial each line belongs to. The tag is stdout-only; the .jsonl gets
+  // the same attribution as structured fields instead.
   console.log = (...args: unknown[]) => {
     const formatted = util.format(...args);
-    originalLog(...args);
+    const tag = trialTag();
+    originalLog(tag ? `${tag} ${formatted}` : formatted);
     writeToLogFiles("INFO", formatted);
   };
 
   console.warn = (...args: unknown[]) => {
     const formatted = util.format(...args);
-    originalWarn(...args);
+    const tag = trialTag();
+    originalWarn(tag ? `${tag} ${formatted}` : formatted);
     writeToLogFiles("WARN", formatted);
   };
 
   console.error = (...args: unknown[]) => {
     const formatted = util.format(...args);
-    originalError(...args);
+    const tag = trialTag();
+    originalError(tag ? `${tag} ${formatted}` : formatted);
     writeToLogFiles("ERROR", formatted);
   };
 
-  // Return a cleanup / restore function
-  return () => {
+  // Return a cleanup / restore function. It resolves only once both log streams
+  // have fully flushed to disk — callers must await it before process.exit, or the
+  // tail of the .jsonl (final trial outcome + summary lines) can be lost to a
+  // flush race, especially under high parallelism's heavier write bursts.
+  return (): Promise<void> => {
     console.log = originalLog;
     console.warn = originalWarn;
     console.error = originalError;
-    if (logFileStream) {
-      logFileStream.end();
-      logFileStream = null;
-    }
-    if (timestampedFileStream) {
-      timestampedFileStream.end();
-      timestampedFileStream = null;
-    }
+    const streams = [logFileStream, timestampedFileStream].filter(
+      (s): s is fs.WriteStream => s !== null,
+    );
+    logFileStream = null;
+    timestampedFileStream = null;
+    return Promise.all(
+      streams.map((s) => new Promise<void>((resolve) => s.end(() => resolve()))),
+    ).then(() => undefined);
   };
 }

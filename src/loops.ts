@@ -15,6 +15,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DocumentObject } from "@adeu/core";
 import { checkScenarioSuccess } from "./success.js";
+import { ResolvedToolConfig } from "./config.js";
 import { getTempDirPath } from "./utils/paths.js";
 import {
   withTimeout,
@@ -46,6 +47,8 @@ export interface LoopStats {
   schemaTokens: number;
   historyTokens: number;
   newContentTokens: number;
+  /** Fixed system + tool-schema overhead re-sent every turn, learned on turn 1. */
+  schemaTokensPerTurn: number;
   historyAccumulated: number;
   roundTrips: number;
   turnsToSuccess: number;
@@ -273,6 +276,7 @@ export function initLoopStats(config: LoopConfig): LoopStats {
     schemaTokens: 0,
     historyTokens: 0,
     newContentTokens: 0,
+    schemaTokensPerTurn: 0,
     historyAccumulated: 0,
     roundTrips: 0,
     turnsToSuccess: config.maxTurns,
@@ -290,7 +294,9 @@ export async function executeTurn(
   contents: Content[],
   stats: LoopStats,
 ): Promise<{ shouldBreak: boolean }> {
-  const prefix = config.loopName ? `${config.loopName} Turn ${turn}` : `Loop Turn ${turn}`;
+  // The tool identity is carried by the trial tag (stdout) and the toolId field
+  // (jsonl), so the per-turn prefix only needs the turn number.
+  const prefix = `Turn ${turn}`;
   const isVerbose = process.argv.includes("--verbose");
 
   if (isVerbose) {
@@ -317,7 +323,16 @@ export async function executeTurn(
   stats.tokensIn += promptTokensThisTurn;
   stats.tokensOut += candidatesTokensThisTurn;
 
-  const sTokens = promptTokensThisTurn;
+  // The first turn's prompt is essentially the fixed overhead — system prompt +
+  // tool schemas + a tiny seed message — that is re-transmitted every turn. We
+  // learn it once and treat it as the per-turn schema cost. Each subsequent turn
+  // then splits into schema (fixed) / history (re-sent conversation) / new content
+  // (genuinely new input this turn), so newContent + output is the irreducible
+  // "floor" of real document work, distinct from platform re-transmission.
+  if (stats.schemaTokensPerTurn === 0) {
+    stats.schemaTokensPerTurn = promptTokensThisTurn;
+  }
+  const sTokens = Math.min(stats.schemaTokensPerTurn, promptTokensThisTurn);
   const hTokens = Math.min(stats.historyAccumulated, Math.max(0, promptTokensThisTurn - sTokens));
   const nTokens = promptTokensThisTurn - sTokens - hTokens;
 
@@ -366,7 +381,6 @@ export async function executeTurn(
     config.executeTool,
     turnStart,
     parts,
-    config.loopName,
   );
 
   appendAndLog(prefix, contents, {
@@ -436,7 +450,6 @@ async function handleFunctionCalls(
   ) => Promise<{ result?: unknown; error?: string; hadError: boolean }>,
   turnStart: number,
   parts: Part[],
-  loopName: string | undefined,
 ): Promise<{ shouldExitSucceeded: boolean; currentTurnHadError: boolean }> {
   let currentTurnHadError = false;
   let shouldExitSucceeded = false;
@@ -500,7 +513,6 @@ async function handleFunctionCalls(
       JSON.stringify({
         timestamp: new Date().toISOString(),
         turn,
-        paradigm: loopName,
         reasoning: reasoningText || undefined,
         tool: fc.name,
         args: fc.args,
@@ -574,15 +586,29 @@ async function handleCompleteTaskCall(
   return { shouldExitSucceeded, currentTurnHadError, functionResponse };
 }
 
-export async function connectMcpClient(
-  packageName: string,
-  clientName: string,
-  extraArgs: string[] = [],
-) {
-  logInfo("", `Connecting to MCP Server package '${packageName}' (client: '${clientName}')...`);
+export interface McpLaunchSpec {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+/** Merge custom env onto the inherited process env, dropping undefined values. */
+function buildMcpEnv(extra?: Record<string, string>): Record<string, string> | undefined {
+  if (!extra) return undefined;
+  const merged: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (typeof v === "string") merged[k] = v;
+  }
+  return { ...merged, ...extra };
+}
+
+export async function connectMcpClient(spec: McpLaunchSpec, clientName: string) {
+  const launchDesc = [spec.command, ...(spec.args ?? [])].join(" ");
+  logInfo("", `Connecting to MCP Server '${launchDesc}' (client: '${clientName}')...`);
   const transport = new StdioClientTransport({
-    command: "npx",
-    args: ["-y", packageName, ...extraArgs],
+    command: spec.command,
+    args: spec.args ?? [],
+    env: buildMcpEnv(spec.env),
   });
   const mcpClient = new Client({ name: clientName, version: "1.0.0" }, { capabilities: {} });
   await withTimeout(
@@ -677,12 +703,19 @@ export function isMcpToolSuccess(toolResult: McpToolResult): boolean {
 export function makeMcpToolExecutor(
   mcpClient: Client,
   sessionDir: string,
-  options: { forceSaveOverwrite?: boolean; clientName: string },
+  options: {
+    argDefaults?: Record<string, Record<string, unknown>>;
+    clientName: string;
+  },
 ) {
   return async (name: string, args: Record<string, unknown>) => {
     const cleanArgs = resolveArgsToSessionDir(args, sessionDir);
-    if (options.forceSaveOverwrite && name === "save") {
-      cleanArgs.allow_overwrite = true;
+    // Apply per-tool argument defaults from config (e.g. forcing allow_overwrite
+    // on a tool's `save`). Config-declared defaults win over model-supplied args,
+    // matching the prior hardcoded forceSaveOverwrite behavior.
+    const defaults = options.argDefaults?.[name];
+    if (defaults) {
+      Object.assign(cleanArgs, defaults);
     }
     const toolResult = await withTimeout(
       mcpClient.callTool({ name, arguments: cleanArgs }),
@@ -696,14 +729,22 @@ export function makeMcpToolExecutor(
   };
 }
 
-export async function runSafeDocxLoop(
+/**
+ * Unified, config-driven agentic loop. Every competitor — whether the bundled
+ * adeu/safe-docx pair or a third party's own MCP server — runs through this one
+ * function. Tool-specific behavior is supplied entirely by `tool` (launch spec,
+ * display name, per-tool argument defaults), so adding a competitor requires no
+ * code changes, only an entry in benchmark.tools.json.
+ */
+export async function runToolLoop(
   gemini: GoogleGenAI,
   modelName: string,
   docPath: string,
   scenarioId: string,
   taskDescription: string,
+  tool: ResolvedToolConfig,
 ): Promise<LoopResult> {
-  logInfo("Safe Docx Loop", `Initializing loop session for scenario '${scenarioId}'...`);
+  logInfo(tool.displayName, `Initializing loop session for scenario '${scenarioId}'...`);
 
   cleanTempDirOnStartup();
 
@@ -728,12 +769,12 @@ export async function runSafeDocxLoop(
   }
 
   const { mcpClient, tools: mcpTools } = await connectMcpClient(
-    "@usejunior/safe-docx",
-    "benchmark-client",
+    { command: tool.command, args: tool.args, env: tool.env },
+    `${tool.id}-benchmark-client`,
   );
 
   const systemPrompt = buildSystemPrompt({
-    toolDisplayName: "Safe Docx MCP",
+    toolDisplayName: tool.displayName,
     docFileName,
     companionDpaName: tempDpaPath ? "dpa-module.docx" : undefined,
     taskDescription,
@@ -747,10 +788,10 @@ export async function runSafeDocxLoop(
     systemPrompt,
     maxTurns: MAX_TURNS,
     tools: [...mapToGeminiTools(mcpTools), COMPLETE_TASK_TOOL],
-    loopName: "Safe Docx Loop",
+    loopName: tool.displayName,
     executeTool: makeMcpToolExecutor(mcpClient, sessionDir, {
-      forceSaveOverwrite: true,
-      clientName: "Safe-Docx",
+      argDefaults: tool.argDefaults,
+      clientName: tool.id,
     }),
     checkSuccess: async (turn, finalFilenames) => {
       let primaryPath = tempFilePath;
@@ -772,7 +813,7 @@ export async function runSafeDocxLoop(
       resolvedFinalFilePath = primaryPath;
       if (!fs.existsSync(primaryPath)) {
         logWarn(
-          "Safe Docx Loop",
+          tool.displayName,
           `[complete_task] Primary final file does not exist: ${primaryPath}`,
         );
         return false;
@@ -796,6 +837,26 @@ export async function runSafeDocxLoop(
   return { ...result, tempFilePath };
 }
 
+/**
+ * Backward-compatible wrappers around {@link runToolLoop} for the two bundled
+ * paradigms. Kept so existing tests and call sites continue to work unchanged.
+ */
+export async function runSafeDocxLoop(
+  gemini: GoogleGenAI,
+  modelName: string,
+  docPath: string,
+  scenarioId: string,
+  taskDescription: string,
+): Promise<LoopResult> {
+  return runToolLoop(gemini, modelName, docPath, scenarioId, taskDescription, {
+    id: "safe-docx",
+    displayName: "Safe Docx MCP",
+    command: "npx",
+    args: ["-y", "@usejunior/safe-docx"],
+    argDefaults: { save: { allow_overwrite: true } },
+  });
+}
+
 export async function runAdeuLoop(
   gemini: GoogleGenAI,
   modelName: string,
@@ -803,94 +864,10 @@ export async function runAdeuLoop(
   scenarioId: string,
   taskDescription: string,
 ): Promise<LoopResult> {
-  logInfo("Adeu Loop", `Initializing loop session for scenario '${scenarioId}'...`);
-
-  cleanTempDirOnStartup();
-
-  const tempDir = getTempDirPath();
-  const sessionDir = path.join(
-    tempDir,
-    `session_${performance.now()}_${Math.random().toString(36).substring(2, 8)}`,
-  );
-  fs.mkdirSync(sessionDir, { recursive: true });
-
-  const docBuffer = fs.readFileSync(docPath);
-  const docFileName = path.basename(docPath);
-  const tempFilePath = path.join(sessionDir, docFileName).replace(/\\/g, "/");
-  fs.writeFileSync(tempFilePath, docBuffer);
-
-  let tempDpaPath: string | undefined = undefined;
-  if (scenarioId === "multi-file-assembly") {
-    const dpaSourcePath = path.resolve(path.dirname(docPath), "dpa-module.docx");
-    if (fs.existsSync(dpaSourcePath)) {
-      tempDpaPath = path.join(sessionDir, "dpa-module.docx").replace(/\\/g, "/");
-      fs.copyFileSync(dpaSourcePath, tempDpaPath);
-    }
-  }
-
-  const { mcpClient, tools: mcpTools } = await connectMcpClient(
-    "@adeu/mcp-server",
-    "adeu-benchmark-client",
-    ["--scope", "docx"],
-  );
-
-  const systemPrompt = buildSystemPrompt({
-    toolDisplayName: "Adeu MCP",
-    docFileName,
-    companionDpaName: tempDpaPath ? "dpa-module.docx" : undefined,
-    taskDescription,
+  return runToolLoop(gemini, modelName, docPath, scenarioId, taskDescription, {
+    id: "adeu",
+    displayName: "Adeu MCP",
+    command: "npx",
+    args: ["-y", "@adeu/mcp-server", "--scope", "docx"],
   });
-  const originalDoc = await DocumentObject.load(docBuffer);
-  let resolvedFinalFilePath = tempFilePath;
-
-  const result = await runAgenticLoop({
-    gemini,
-    modelName,
-    systemPrompt,
-    maxTurns: MAX_TURNS,
-    tools: [...mapToGeminiTools(mcpTools), COMPLETE_TASK_TOOL],
-    loopName: "Adeu Loop",
-    executeTool: makeMcpToolExecutor(mcpClient, sessionDir, {
-      forceSaveOverwrite: false,
-      clientName: "Adeu-MCP",
-    }),
-    checkSuccess: async (turn, finalFilenames) => {
-      let primaryPath = tempFilePath;
-      if (finalFilenames && finalFilenames.length > 0) {
-        for (const filename of finalFilenames) {
-          const base = path.basename(filename);
-          const resolvedPath = path.join(sessionDir, base).replace(/\\/g, "/");
-          if (!fs.existsSync(resolvedPath)) {
-            continue;
-          }
-          if (base.toLowerCase().includes("dpa") && base !== "dpa-module.docx") {
-            const stdDpaPath = path.join(sessionDir, "dpa-module.docx").replace(/\\/g, "/");
-            fs.copyFileSync(resolvedPath, stdDpaPath);
-          } else {
-            primaryPath = resolvedPath;
-          }
-        }
-      }
-      resolvedFinalFilePath = primaryPath;
-      if (!fs.existsSync(primaryPath)) {
-        logWarn("Adeu Loop", `[complete_task] Primary final file does not exist: ${primaryPath}`);
-        return false;
-      }
-      const currentBuffer = fs.readFileSync(primaryPath);
-      const currentDoc = await DocumentObject.load(currentBuffer);
-      return checkScenarioSuccess(scenarioId, originalDoc, currentDoc, primaryPath);
-    },
-    getFinalBuffer: async () => {
-      return fs.existsSync(resolvedFinalFilePath)
-        ? fs.readFileSync(resolvedFinalFilePath)
-        : fs.existsSync(tempFilePath)
-          ? fs.readFileSync(tempFilePath)
-          : docBuffer;
-    },
-    cleanup: async () => {
-      await mcpClient.close();
-    },
-  });
-
-  return { ...result, tempFilePath };
 }

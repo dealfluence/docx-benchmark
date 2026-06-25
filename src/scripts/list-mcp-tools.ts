@@ -3,7 +3,10 @@ import { connectMcpClient } from "../loops.js";
 async function main() {
   console.log("=== LISTING SAFE-DOCX TOOLS ===");
   try {
-    const { tools } = await connectMcpClient("@usejunior/safe-docx", "safe-docx-list");
+    const { tools } = await connectMcpClient(
+      { command: "npx", args: ["-y", "@usejunior/safe-docx"] },
+      "safe-docx-list",
+    );
     for (const t of tools) {
       console.log(`- Tool: ${t.name}`);
       console.log(`  Description: ${t.description}`);
@@ -15,7 +18,10 @@ async function main() {
 
   console.log("\n=== LISTING ADEU TOOLS ===");
   try {
-    const { tools } = await connectMcpClient("@adeu/mcp-server", "adeu-list", ["--scope", "docx"]);
+    const { tools } = await connectMcpClient(
+      { command: "npx", args: ["-y", "@adeu/mcp-server", "--scope", "docx"] },
+      "adeu-list",
+    );
     for (const t of tools) {
       console.log(`- Tool: ${t.name}`);
       console.log(`  Description: ${t.description}`);

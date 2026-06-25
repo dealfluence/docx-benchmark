@@ -1,0 +1,16 @@
+{
+  "$comment": "Tools-under-test for the benchmark. Each entry is an MCP server launched over stdio (mcpServers-style: command + args + env). Add your own MCP tool here to benchmark it against the others - no code changes required. 'displayName' is the label shown to the model; 'argDefaults' merges per-tool-name argument defaults into every matching MCP tool call (e.g. forcing allow_overwrite on save).",
+  "tools": {
+    "adeu": {
+      "displayName": "Adeu MCP",
+      "command": "npx",
+      "args": ["-y", "@adeu/mcp-server", "--scope", "docx"]
+    },
+    "safe-docx": {
+      "displayName": "Safe Docx MCP",
+      "command": "npx",
+      "args": ["-y", "@usejunior/safe-docx"],
+      "argDefaults": { "save": { "allow_overwrite": true } }
+    }
+  }
+}

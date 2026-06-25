@@ -133,7 +133,7 @@ This division provides an honest metric separating conversation architecture ove
 To ensure a rigorous and balanced comparison between all four paradigms, the agentic execution loops adhere to strict standardization principles:
 
 ### 5.1 Unified Conversational Turn Limits
-Both agentic loop implementations (`safe-docx` and `adeu` loops) are restricted to an identical maximum turn cap of **`MAX_TURNS = 20`**. Turn limits are applied symmetrically to eliminate runtime biases.
+All tool-under-test agentic loops run through a single shared implementation (`runToolLoop`) restricted to an identical maximum turn cap of **`MAX_TURNS = 40`**. Turn limits are applied symmetrically to eliminate runtime biases.
 
 ### 5.2 Single-Path Schema Normalization
 Tool definitions originating from third-party MCP servers undergo standard dynamic schema normalization in `cleanSchema` before being registered with Google Gemini. This translation process enforces:

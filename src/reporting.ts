@@ -34,7 +34,7 @@ export interface LiveTrialSummary {
   model: string;
   scenarioId: string;
   scenarioName: string;
-  paradigm: "adeu" | "safe-docx";
+  tool: string;
   docSize: "small" | "large";
   supported: boolean;
   reps: number;
@@ -81,14 +81,14 @@ export function getFullTaskDescription(
 export function formatTokenMetric(
   metric: Stats,
   floorMetric?: Stats,
-  isSafeDocx = false,
+  showFloor = false,
   useLocale = false,
 ): string {
   const f = (val: number) => {
     const rounded = Math.round(val);
     return useLocale ? rounded.toLocaleString("en-US") : String(rounded);
   };
-  if (isSafeDocx && floorMetric) {
+  if (showFloor && floorMetric) {
     return `${f(floorMetric.mean)} / ${f(metric.mean)} [${f(floorMetric.min)}-${f(floorMetric.max)} / ${f(metric.min)}-${f(metric.max)}] (floor/total)`;
   }
   return `${f(metric.mean)} [${f(metric.min)}-${f(metric.max)}]`;
@@ -97,7 +97,7 @@ export function formatTokenMetric(
 export function printLiveConsoleSummary(summaries: LiveTrialSummary[], reps: number) {
   console.log(`\n\x1b[1m\x1b[32m=== LIVE BENCHMARK CONSOLE SUMMARY (N=${reps}) ===\x1b[0m`);
   const tableRows = summaries.map((s) => {
-    const isSafe = s.paradigm === "safe-docx";
+    const showFloor = !!s.newContentTokens;
     const totalFloorStats: Stats | undefined = s.newContentTokens
       ? {
           mean: s.newContentTokens.mean + s.tokensOut.mean,
@@ -109,7 +109,7 @@ export function printLiveConsoleSummary(summaries: LiveTrialSummary[], reps: num
     return {
       Provider: s.provider,
       Scenario: s.scenarioId,
-      Paradigm: s.paradigm,
+      Tool: s.tool,
       Size: s.docSize,
       "Succ Rate": s.successRate,
       "XML Delta": `${s.xmlDelta.mean.toFixed(0)} [${s.xmlDelta.min}-${s.xmlDelta.max}]`,
@@ -118,19 +118,96 @@ export function printLiveConsoleSummary(summaries: LiveTrialSummary[], reps: num
       Trips: `${s.roundTrips.mean.toFixed(1)} [${s.roundTrips.min}-${s.roundTrips.max}]`,
       TurnsSucc: `${s.turnsToSuccess.mean.toFixed(1)} [${s.turnsToSuccess.min}-${s.turnsToSuccess.max}]`,
       Submits: `${s.completeTaskCalls.mean.toFixed(1)} [${s.completeTaskCalls.min}-${s.completeTaskCalls.max}]`,
-      "Tokens In": formatTokenMetric(s.tokensIn, s.newContentTokens, isSafe, false),
+      "Tokens In": formatTokenMetric(s.tokensIn, s.newContentTokens, showFloor, false),
       "Tokens Out": `${Math.round(s.tokensOut.mean)} [${Math.round(s.tokensOut.min)}-${Math.round(s.tokensOut.max)}]`,
-      "Total Tokens": formatTokenMetric(s.totalTokens, totalFloorStats, isSafe, false),
+      "Total Tokens": formatTokenMetric(s.totalTokens, totalFloorStats, showFloor, false),
       Latency: `${(s.latency.mean / 1000).toFixed(1)}s [${(s.latency.min / 1000).toFixed(1)}-${(s.latency.max / 1000).toFixed(1)}]`,
     };
   });
   console.table(tableRows);
 }
 
+/** Quote a CSV cell only when it contains a comma, quote, or newline. */
+function csvCell(value: string | number): string {
+  const s = String(value);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Parse an "X/Y" rate string into its numerator and denominator. */
+function parseRate(rate: string): { num: number; den: number } {
+  const [a, b] = rate.split("/");
+  const num = parseInt(a, 10);
+  const den = parseInt(b, 10);
+  return { num: isNaN(num) ? 0 : num, den: isNaN(den) ? 0 : den };
+}
+
+/**
+ * Flat, spreadsheet-friendly results: one row per scenario x tool, mean values
+ * only, with rates expanded into numeric columns. This is the headline
+ * easy-to-reason-about artifact; the .md/.json keep full min-max detail.
+ */
+export function buildCsv(summaries: LiveTrialSummary[]): string {
+  const headers = [
+    "tool",
+    "scenario",
+    "scenarioName",
+    "provider",
+    "model",
+    "reps",
+    "successes",
+    "successRatePct",
+    "fidelityMeanPct",
+    "xmlIntegrityPass",
+    "xmlDeltaMean",
+    "roundTripsMean",
+    "turnsToSuccessMean",
+    "taskSubmitsMean",
+    "recoveryRatePct",
+    "tokensInMean",
+    "tokensOutMean",
+    "totalTokensMean",
+    "newContentTokensMean",
+    "latencyMeanSec",
+  ];
+
+  const rows = summaries.map((s) => {
+    const succ = parseRate(s.successRate);
+    const integ = parseRate(s.xmlIntegrityRate);
+    const successPct = succ.den ? (succ.num / succ.den) * 100 : 0;
+    return [
+      s.tool,
+      s.scenarioId,
+      s.scenarioName,
+      s.provider,
+      s.model,
+      s.reps,
+      succ.num,
+      successPct.toFixed(1),
+      s.fidelity.mean.toFixed(1),
+      integ.num,
+      Math.round(s.xmlDelta.mean),
+      s.roundTrips.mean.toFixed(1),
+      s.turnsToSuccess.mean.toFixed(1),
+      s.completeTaskCalls.mean.toFixed(1),
+      (s.recoveryRate.mean * 100).toFixed(1),
+      Math.round(s.tokensIn.mean),
+      Math.round(s.tokensOut.mean),
+      Math.round(s.totalTokens.mean),
+      s.newContentTokens ? Math.round(s.newContentTokens.mean) : "",
+      (s.latency.mean / 1000).toFixed(1),
+    ]
+      .map(csvCell)
+      .join(",");
+  });
+
+  return [headers.map(csvCell).join(","), ...rows].join("\n") + "\n";
+}
+
 export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: number) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const jsonPath = path.join("./results", `${timestamp}.json`);
   const mdPath = path.join("./results", `${timestamp}.md`);
+  const csvPath = path.join("./results", `${timestamp}.csv`);
 
   fs.mkdirSync("./results", { recursive: true });
 
@@ -139,6 +216,13 @@ export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: numbe
   fs.writeFileSync("./live_benchmark_results.json", jsonStr, "utf-8");
   console.log(
     `\x1b[32m[JSON Results Written]\x1b[0m Saved to ${jsonPath} and ./live_benchmark_results.json`,
+  );
+
+  const csvStr = buildCsv(summaries);
+  fs.writeFileSync(csvPath, csvStr, "utf-8");
+  fs.writeFileSync("./live_benchmark_results.csv", csvStr, "utf-8");
+  console.log(
+    `\x1b[32m[CSV Results Written]\x1b[0m Saved to ${csvPath} and ./live_benchmark_results.csv`,
   );
 
   let md = `# Live Benchmark Report\n\n`;
@@ -165,7 +249,7 @@ export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: numbe
     md += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
 
     for (const s of sResults) {
-      const isSafe = s.paradigm === "safe-docx";
+      const showFloor = !!s.newContentTokens;
       const totalFloorStats: Stats | undefined = s.newContentTokens
         ? {
             mean: s.newContentTokens.mean + s.tokensOut.mean,
@@ -175,10 +259,10 @@ export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: numbe
         : undefined;
 
       md +=
-        `| **${s.paradigm}** | ${s.docSize} | ${s.successRate} | ${s.xmlDelta.mean.toFixed(0)} [${s.xmlDelta.min}-${s.xmlDelta.max}] | ${s.fidelity.mean.toFixed(1)}% [${s.fidelity.min}-${s.fidelity.max}] | ${s.xmlIntegrityRate} | ${s.roundTrips.mean.toFixed(1)} [${s.roundTrips.min}-${s.roundTrips.max}] | ${s.turnsToSuccess.mean.toFixed(1)} [${s.turnsToSuccess.min}-${s.turnsToSuccess.max}] | ${s.completeTaskCalls.mean.toFixed(1)} [${s.completeTaskCalls.min}-${s.completeTaskCalls.max}] | ${(s.recoveryRate.mean * 100).toFixed(1)}% [${(s.recoveryRate.min * 100).toFixed(1)}%-${(s.recoveryRate.max * 100).toFixed(1)}%] | ` +
-        `${formatTokenMetric(s.tokensIn, s.newContentTokens, isSafe, true)} | ` +
+        `| **${s.tool}** | ${s.docSize} | ${s.successRate} | ${s.xmlDelta.mean.toFixed(0)} [${s.xmlDelta.min}-${s.xmlDelta.max}] | ${s.fidelity.mean.toFixed(1)}% [${s.fidelity.min}-${s.fidelity.max}] | ${s.xmlIntegrityRate} | ${s.roundTrips.mean.toFixed(1)} [${s.roundTrips.min}-${s.roundTrips.max}] | ${s.turnsToSuccess.mean.toFixed(1)} [${s.turnsToSuccess.min}-${s.turnsToSuccess.max}] | ${s.completeTaskCalls.mean.toFixed(1)} [${s.completeTaskCalls.min}-${s.completeTaskCalls.max}] | ${(s.recoveryRate.mean * 100).toFixed(1)}% [${(s.recoveryRate.min * 100).toFixed(1)}%-${(s.recoveryRate.max * 100).toFixed(1)}%] | ` +
+        `${formatTokenMetric(s.tokensIn, s.newContentTokens, showFloor, true)} | ` +
         `${Math.round(s.tokensOut.mean).toLocaleString()} [${Math.round(s.tokensOut.min).toLocaleString()}-${Math.round(s.tokensOut.max).toLocaleString()}] | ` +
-        `${formatTokenMetric(s.totalTokens, totalFloorStats, isSafe, true)} | ` +
+        `${formatTokenMetric(s.totalTokens, totalFloorStats, showFloor, true)} | ` +
         `${(s.latency.mean / 1000).toFixed(1)}s [${(s.latency.min / 1000).toFixed(1)}-${(s.latency.max / 1000).toFixed(1)}] |\n`;
     }
     md += `\n`;

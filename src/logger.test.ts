@@ -71,7 +71,7 @@ describe("Logger Utility", () => {
     const toolStepObj = {
       timestamp: "2026-06-23T18:00:00.000Z",
       turn: 2,
-      paradigm: "safe-docx",
+      toolId: "safe-docx",
       tool: "modify",
       args: { target_text: "foo", new_text: "bar" },
       ok: true,
@@ -95,7 +95,7 @@ describe("Logger Utility", () => {
     expect(log.timestamp).toBe("2026-06-23T18:00:00.000Z");
     expect(log.type).toBe("tool_step");
     expect(log.turn).toBe(2);
-    expect(log.paradigm).toBe("safe-docx");
+    expect(log.toolId).toBe("safe-docx");
     expect(log.tool).toBe("modify");
     expect(log.args).toEqual({ target_text: "foo", new_text: "bar" });
     expect(log.ok).toBe(true);

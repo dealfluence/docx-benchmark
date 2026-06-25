@@ -129,6 +129,18 @@ describe("F4 Guard Test: Token Summing", () => {
     // Sum: 250 in, 30 out
     expect(loopRes.tokensIn).toBe(250);
     expect(loopRes.tokensOut).toBe(30);
+
+    // The schema/history/new-content split must sum exactly to tokensIn and
+    // isolate a non-zero new-content floor (regression guard for the bug where
+    // schema swallowed the entire prompt, forcing newContent to 0).
+    // Turn 1 prompt (100) is learned as the fixed schema cost.
+    // Turn 2: schema 100, history 10 (turn-1 new+out), newContent 40.
+    expect(loopRes.schemaTokens).toBe(200);
+    expect(loopRes.historyTokens).toBe(10);
+    expect(loopRes.newContentTokens).toBe(40);
+    expect(
+      (loopRes.schemaTokens ?? 0) + (loopRes.historyTokens ?? 0) + (loopRes.newContentTokens ?? 0),
+    ).toBe(loopRes.tokensIn);
   }, 60000);
 });
 

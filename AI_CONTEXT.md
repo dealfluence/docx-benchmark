@@ -9,10 +9,14 @@ This document serves as the long-term context file for developers and AI agents 
 > [!NOTE]
 > This benchmark focuses exclusively on multi-turn, agentic round-trip workflows. There are **no one-shot** workflows included in the suite.
 
-The benchmark measures and compares two agentic document-editing paradigms on equal terms (same model, temperature, reps, and tokenizer settings) over standard stdio transport:
+The benchmark measures and compares **any number of MCP-based document-editing tools** on equal terms (same model, temperature, reps, and tokenizer settings) over standard stdio transport. The set of tools under test is **not hardcoded** — it is declared in [`benchmark.tools.json`](benchmark.tools.json) (an `mcpServers`-style config; see [`src/config.ts`](src/config.ts)), so anyone can drop in their own MCP server and benchmark it against the others with no code changes. Every tool runs through one shared, config-driven loop, `runToolLoop` in [`src/loops.ts`](src/loops.ts).
+
+The two **bundled default** tools (used when no config file is present) are:
 
 1. **`adeu`**: Projects the document to CriticMarkup and applies structured modification instructions using a multi-turn tool-calling loop against the `@adeu/mcp-server`.
 2. **`safe-docx`**: Executes a stateful, multi-turn tool-calling loop against the `@usejunior/safe-docx` MCP server.
+
+A tool entry carries its launch spec (`command`/`args`/`env`), a `displayName`, and optional `argDefaults` — a per-tool-name map of argument defaults merged into every matching MCP call (e.g. forcing `allow_overwrite: true` on `safe-docx`'s `save`), which keeps tool-specific quirks in config rather than in code.
 
 ---
 
@@ -57,7 +61,7 @@ To make an honest architectural comparison with multi-turn loops, `safe-docx` to
 Both **Total Tokens** and the **`newContentTokens` floor** are reported to distinguish platform overhead from core document handling.
 
 ### 3.3 Unified Loop Turn Limit
-Both the `safe-docx` and `adeu` agentic loops are governed by a unified execution ceiling of `MAX_TURNS = 20` conversational turns to eliminate execution biases.
+All tool-under-test agentic loops are governed by a unified execution ceiling of `MAX_TURNS = 40` conversational turns to eliminate execution biases.
 
 ### 3.4 Tool Call Observability
 Multi-turn agent executions must report intermediate steps as single-line structured JSON objects rather than scattered stdout logs. This guarantees clean diagnostic paths for automated performance parsers.
@@ -70,3 +74,16 @@ When designing tool schemas with complex nesting (such as arrays of object union
 ### 3.6 Automated Pre-Commit Safety & Cross-Platform Integrity
 *   **Continuous Quality Guard (Husky)**: A pre-commit hook runs automated code formatting (`prettier`), linting (`eslint`), and type verification (`tsc --noEmit`) before any commit is accepted, preventing syntax or structural regressions from entering the branch.
 *   **Deterministic Line Endings (`.gitattributes`)**: A workspace-wide Git attributes configuration forces LF (Unix) line endings for code, markdown, and configuration files. This eliminates line-ending conflicts across development environments while explicitly identifying `.docx` packages as binary files.
+
+---
+
+## 4. Execution & Reporting
+
+### 4.1 Parallel Trial Execution
+The run is flattened into independent trials (provider × tool × scenario × rep) and dispatched through a bounded concurrency pool (`runPool` in [`src/live.ts`](src/live.ts)). Each trial spawns its **own** MCP subprocess and writes into its **own** isolated `temp/session_*` directory, so trials are safe to run concurrently. Concurrency is configurable via `--concurrency N` or `BENCHMARK_CONCURRENCY` (default `10`); the pool is fail-fast (a worker throwing rejects the run, matching the prior sequential semantics). All reps are flattened into one queue, so workers pull the next trial regardless of rep — there is no barrier between rep sets. Result grouping is order-independent — summaries are rebuilt deterministically (provider → scenario → tool) regardless of completion order.
+
+### 4.2 Per-Trial Log Attribution (`AsyncLocalStorage`)
+Because parallel trials share one global `console` and one `.jsonl` sink, each trial runs inside an `AsyncLocalStorage` context (`src/utils/trial-context.ts`) carrying `{ trialId, toolId, scenario, rep }`. The logger ([`src/utils/logger.ts`](src/utils/logger.ts)) stamps every structured `.jsonl` line with these fields (keeping the log fully `jq`-grep-able under interleaving) and prefixes interleaved **stdout** lines with a `[toolId/scenario#rep]` tag. The tag is stdout-only; the `.jsonl` gets the same attribution as discrete fields.
+
+### 4.3 Results Artifacts
+`writeLiveResultsFiles` emits, per run: the streaming `.jsonl` log, a detailed `.md` report and `.json` summary (full min/max), and a flat, spreadsheet-friendly **`.csv`** (one row per scenario × tool, mean values, rates expanded into numeric columns). Static latest-run copies are written to `live_benchmark_results.{json,md,csv}` and timestamped copies under `results/`. The token floor/total breakdown (`newContentTokens` floor vs total) is now reported **uniformly for every tool**, since both bundled paradigms are multi-turn loops and the breakdown is computed for all of them.

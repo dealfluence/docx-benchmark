@@ -5,7 +5,7 @@ Benchmarking suite designed to measure the efficiency, token consumption, and fo
 > [!NOTE]
 > This benchmark contains **no one-shot** workflows. It strictly evaluates and compares multi-turn, agentic round-trip workflows.
 
-This suite compares **Adeu** (agentic loop executing over `@adeu/mcp-server`) against **Safe Docx** (`@usejunior/safe-docx` agentic loop).
+The suite benchmarks **any set of MCP-based document tools** against the same scenarios on equal terms. The tools under test are declared in [`benchmark.tools.json`](benchmark.tools.json) — **bring your own MCP server** and benchmark it with no code changes. Out of the box it ships with two tools: **Adeu** (agentic loop over `@adeu/mcp-server`) and **Safe Docx** (`@usejunior/safe-docx`).
 
 Detailed design choices, cost formulas, and scoring rules are documented in the [METHODOLOGY.md](METHODOLOGY.md) file.
 
@@ -22,12 +22,13 @@ Detailed design choices, cost formulas, and scoring rules are documented in the 
 
 ## Scenarios Measured
 
-1.  **Surgical Correction (`surgical-correction`)**: Modifies a single word in a 20-page document.
-2.  **Clause Drafting (`clause-drafting`)**: Inserts a structured 3-paragraph section, measuring format inheritance.
-3.  **Negotiation Cleanup (`negotiation-cleanup`)**: Finalizes an existing tracked revision.
-4.  **Bulk Rewrite (`bulk-rewrite`)**: Rewrites an entire section. Testing the boundaries where surgical output advantages are minimized.
-5.  **Whole Document Restyle (`whole-document-restyle`)**: Global capitalization check touching most document elements.
-6.  **No-Op / Already Correct (`no-op`)**: Robustness check where the target edit is absent; tests whether the model hallucinates modifications.
+Scenarios are data-driven and defined in [`src/scenarios.ts`](src/scenarios.ts):
+
+1.  **Form Fill (`form-fill`)**: Populate placeholders in a Post-Money SAFE template with supplied deal data, leaving no blanks behind.
+2.  **Contract Clone & Party Swap (`party-swap`)**: Globally swap contracting-party placeholders consistently across a Series Seed Investment Agreement.
+3.  **Policy Checklist Review (`policy-checklist-review`)**: Analyze a Cloud Service Agreement against a 3-point checklist and append a JSON review summary.
+4.  **Playbook-based Commenting (`playbook-commenting`)**: Locate a non-conforming late-payment interest clause and insert an OOXML margin comment with playbook feedback.
+5.  **Multi-file Deal Assembly (`multi-file-assembly`)**: Propagate synchronized variables across both a CSA and its companion DPA in one transactional run.
 
 ---
 
@@ -47,6 +48,37 @@ Open `.env` and fill in your API key for Google Gemini (`GEMINI_API_KEY`).
 
 ---
 
+## Configuring Tools Under Test
+
+The tools the benchmark runs are declared in [`benchmark.tools.json`](benchmark.tools.json), using the familiar `mcpServers` shape. Each entry is an MCP server launched over stdio:
+
+```json
+{
+  "tools": {
+    "adeu": {
+      "displayName": "Adeu MCP",
+      "command": "npx",
+      "args": ["-y", "@adeu/mcp-server", "--scope", "docx"]
+    },
+    "my-tool": {
+      "displayName": "My MCP Tool",
+      "command": "python",
+      "args": ["-m", "my_mcp_server"],
+      "env": { "MY_FLAG": "1" },
+      "argDefaults": { "save": { "allow_overwrite": true } }
+    }
+  }
+}
+```
+
+- **`command` / `args` / `env`**: how to launch the MCP server (any runtime — node, python, docker, …).
+- **`displayName`**: the label shown to the model (defaults to the tool id).
+- **`argDefaults`** *(optional)*: per-tool-name argument defaults merged into every matching MCP call — useful for tool-specific quirks without code changes.
+
+To benchmark **your own** MCP server, add an entry here and run the suite — no code changes required. Point at a different file with `--tools <path>` or the `BENCHMARK_TOOLS` env var. If no config file exists, the suite falls back to the bundled `adeu` + `safe-docx` defaults.
+
+---
+
 ## Running the Benchmark
 
 To execute the live benchmarking suite and run active document redlining scenarios against the configured LLMs:
@@ -55,15 +87,29 @@ To execute the live benchmarking suite and run active document redlining scenari
 # Run the full live API benchmark suite
 npm run benchmark
 
-# Run the quick live benchmark (1 rep, subset of scenarios)
+# Run the quick live benchmark (1 rep)
 npm run benchmark:quick
+
+# Tune parallelism (trials run concurrently; default 10)
+npm run benchmark -- --concurrency 8
+# ...or via env
+BENCHMARK_CONCURRENCY=8 npm run benchmark
 ```
 
-The live benchmark will compile the codebase, detect active keys in the environment, make actual API calls to run each paradigm and scenario, verify success, assess fidelity, and write reports to `results/<ISO>.json` and `results/<ISO>.md`.
+Trials (tool × scenario × rep) run **in parallel** through a bounded concurrency pool — set `--concurrency N` / `BENCHMARK_CONCURRENCY` to trade wall-clock time against API rate limits. Repetitions are controlled with `--reps N` / `BENCHMARK_REPS`.
 
-Additionally, all stdout logs and structured tool steps are written in real time to standard-compliant **JSON Lines** (`.jsonl`) files:
+The live benchmark compiles the codebase, detects active keys in the environment, makes actual API calls to run each tool and scenario, verifies success, assesses fidelity, and writes reports:
+- `results/<ISO>.json` and `results/<ISO>.md` — detailed summary with min/max.
+- `results/<ISO>.csv` (and `./live_benchmark_results.csv`) — flat, spreadsheet-friendly results: one row per scenario × tool.
+
+Additionally, all stdout logs and structured tool steps are written in real time to standard-compliant **JSON Lines** (`.jsonl`) files, with every line tagged by `trialId` / `toolId` / `scenario` / `rep` so a parallel run stays `jq`-grep-able:
 - `./live_benchmark.jsonl` (always contains the logs of the latest benchmark run).
 - `results/<ISO>.jsonl` (contains the logged history for that specific run).
+
+```bash
+# Example: extract one tool's tool-steps from a parallel run
+jq -c 'select(.type=="tool_step" and .toolId=="adeu")' live_benchmark.jsonl
+```
 
 ---
 
