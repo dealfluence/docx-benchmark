@@ -143,8 +143,7 @@ export function writeLiveResultsFiles(summaries: LiveTrialSummary[], reps: numbe
 
   let md = `# Live Benchmark Report\n\n`;
   md += `**Date:** ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}\n`;
-  md += `**Repetitions (N):** ${reps} per trial\n`;
-  md += `**Temperature:** 0.0\n\n`;
+  md += `**Repetitions (N):** ${reps} per trial\n\n`;
 
   md +=
     `## Models Configured\n` +
