@@ -1,0 +1,39 @@
+{
+  "$comment": "LOCAL-DEV comparison config. Runs the local working-tree adeu MCP servers (Node + Python) side-by-side against their published versions and safe-docx. Use with:  npm run benchmark -- --tools benchmark.tools.local.json  (or set BENCHMARK_TOOLS). Prerequisites: (1) the adeu repo checked out as a SIBLING of this repo (../adeu); (2) the Node server built — `cd ../adeu/node && npm run build`; (3) `uv` on PATH for the Python entries. Relative paths resolve against this repo's root (the MCP child inherits the benchmark's cwd). Verify everything launches without spending API quota:  npm run tools:check -- --tools benchmark.tools.local.json",
+  "tools": {
+    "adeu-node-local": {
+      "displayName": "Adeu Node (local dev)",
+      "command": "node",
+      "args": ["../adeu/node/packages/mcp-server/dist/index.js", "--scope", "docx"]
+    },
+    "adeu-node-published": {
+      "displayName": "Adeu Node (published)",
+      "command": "npx",
+      "args": ["-y", "@adeu/mcp-server", "--scope", "docx"]
+    },
+    "adeu-python-local": {
+      "displayName": "Adeu Python (local dev)",
+      "command": "uv",
+      "args": ["run", "--project", "../adeu/python", "adeu-server", "--scope", "docx"],
+      "env": {
+        "FASTMCP_SHOW_SERVER_BANNER": "false",
+        "FASTMCP_CHECK_FOR_UPDATES": "off"
+      }
+    },
+    "adeu-python-published": {
+      "displayName": "Adeu Python (published)",
+      "command": "uvx",
+      "args": ["--from", "adeu", "adeu-server", "--scope", "docx"],
+      "env": {
+        "FASTMCP_SHOW_SERVER_BANNER": "false",
+        "FASTMCP_CHECK_FOR_UPDATES": "off"
+      }
+    },
+    "safe-docx": {
+      "displayName": "Safe Docx MCP",
+      "command": "npx",
+      "args": ["-y", "@usejunior/safe-docx"],
+      "argDefaults": { "save": { "allow_overwrite": true } }
+    }
+  }
+}

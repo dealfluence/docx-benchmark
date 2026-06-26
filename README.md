@@ -77,6 +77,41 @@ The tools the benchmark runs are declared in [`benchmark.tools.json`](benchmark.
 
 To benchmark **your own** MCP server, add an entry here and run the suite — no code changes required. Point at a different file with `--tools <path>` or the `BENCHMARK_TOOLS` env var. If no config file exists, the suite falls back to the bundled `adeu` + `safe-docx` defaults.
 
+### Comparing local dev builds vs. published versions
+
+Because a tool is just an MCP launch spec, you can pit your **local working-tree** adeu servers against their **published** releases (and against each other across the Node and Python engines) in one run. A ready-made config ships as [`benchmark.tools.local.json`](benchmark.tools.local.json):
+
+| Tool id | What it runs |
+|---|---|
+| `adeu-node-local` | `node ../adeu/node/packages/mcp-server/dist/index.js` |
+| `adeu-node-published` | `npx -y @adeu/mcp-server` |
+| `adeu-python-local` | `uv run --project ../adeu/python adeu-server` |
+| `adeu-python-published` | `uvx --from adeu adeu-server` |
+| `safe-docx` | `npx -y @usejunior/safe-docx` |
+
+Prerequisites:
+
+- The **adeu** repo checked out as a **sibling** of this one (`../adeu`). The relative paths resolve against this repo's root (the MCP child inherits the benchmark's working directory).
+- The **Node** server built from source: `cd ../adeu/node && npm run build` (the local entry runs `dist/index.js`).
+- **`uv`** on your `PATH` for the Python entries (`uv`/`uvx`). The Python entries set `FASTMCP_SHOW_SERVER_BANNER=false` and `FASTMCP_CHECK_FOR_UPDATES=off` to keep stdio clean and avoid a startup network call.
+
+First, verify every server **launches and advertises its tools** — no API key, no scored run, no quota spent:
+
+```bash
+npm run tools:check -- --tools benchmark.tools.local.json
+```
+
+This connects to each configured tool over stdio, completes the MCP handshake, and lists the tools it exposes (exiting non-zero if any fail to launch). Then run the scored benchmark against the same config:
+
+```bash
+npm run benchmark -- --tools benchmark.tools.local.json
+# or a quick 1-rep pass:
+npm run benchmark:quick -- --tools benchmark.tools.local.json
+```
+
+> [!NOTE]
+> The two engines expose slightly different docx tools (the Node build adds `finalize_document`; the Python build adds `open_local_file`), but both share the `read_docx` / `process_document_batch` / `diff_docx_files` / `accept_all_changes` core the scenarios exercise. Each tool's `displayName` is what appears in the report, so local and published columns stay distinct.
+
 ---
 
 ## Running the Benchmark

@@ -16,7 +16,8 @@
     "prepare": "husky",
     "benchmark": "tsc && node dist/live.js",
     "benchmark:quick": "tsc && node dist/live.js --quick",
-    "inspect-fixture": "tsc && node dist/scripts/inspect-fixture.js"
+    "inspect-fixture": "tsc && node dist/scripts/inspect-fixture.js",
+    "tools:check": "tsc && node dist/scripts/check-tools.js"
   },
   "keywords": [],
   "author": "",
