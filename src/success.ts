@@ -29,202 +29,191 @@ function countLiteral(haystack: string, needle: string): number {
   return count;
 }
 
+/** Finalized ("accepted") plain text of a document. */
+function plainText(doc: DocumentObject): string {
+  return new DocumentMapper(doc, true).full_text;
+}
+
+/** CriticMarkup view: original text plus {++insert++}, {--delete--}, {>>comment<<}. */
+function criticText(doc: DocumentObject): string {
+  return new DocumentMapper(doc, false).full_text;
+}
+
+/** Does the package carry a comments part? */
+function hasCommentsPart(doc: DocumentObject): boolean {
+  return doc.pkg.parts.some((p) => p.partname.includes("comments"));
+}
+
+/** Count of native OOXML tracked changes (insertions + deletions). */
+function trackedChangeCount(doc: DocumentObject): number {
+  const xml = doc.part.blob;
+  return (xml.match(/<w:ins\s/g) || []).length + (xml.match(/<w:del\s/g) || []).length;
+}
+
+/**
+ * The reviewer's ADDED content only — text inside insertions ({++..++}) and
+ * comments ({>>..<<}) — lowercased. Deliberately excludes the original body so a
+ * redline-review scenario cannot "pass" on words that were already in the
+ * document (e.g. the clause heading "Governing Law").
+ */
+function addedReviewText(doc: DocumentObject): string {
+  const critic = criticText(doc);
+  const parts: string[] = [];
+  for (const m of critic.matchAll(/\{\+\+([\s\S]*?)\+\+\}/g)) parts.push(m[1]);
+  for (const m of critic.matchAll(/\{>>([\s\S]*?)<<\}/g)) parts.push(m[1]);
+  return parts.join(" \n ").toLowerCase();
+}
+
 export async function checkScenarioSuccess(
   scenarioId: string,
   originalDoc: DocumentObject,
   modifiedDoc: DocumentObject,
   tempFilePath?: string,
 ): Promise<boolean> {
-  const modPlain = new DocumentMapper(modifiedDoc, true).full_text;
-
   switch (scenarioId) {
     case "form-fill": {
-      // Target values (exact, normalized): Company, Investor, and BOTH dollar blanks filled.
-      const hasCompany = hasNorm(modPlain, "Acme Corporate Technologies, Inc.");
-      const hasInvestor = hasNorm(modPlain, "Jane Founder");
-      const hasValuation = hasNorm(modPlain, "$15,000,000") || hasNorm(modPlain, "15,000,000");
+      // All values are sourced from deal-data-sheet.docx; every SAFE placeholder
+      // now has corresponding data, so a complete fill is well-defined.
+      const m = plainText(modifiedDoc);
 
-      // Placeholders must be gone. The fixture has TWO identical "$[_____________]" blanks
-      // (Purchase Amount + Post-Money Valuation Cap); a half-fill leaves one behind.
-      const noCompanyPlaceholder = !modPlain.includes("[Company Name]");
-      const noInvestorPlaceholder = !modPlain.includes("[Investor Name]");
-      const noDollarBlanks = !modPlain.includes("$[_____________]");
+      const requiredValues = [
+        "Acme Robotics, Inc.", // Company Name
+        "Vertex Seed Fund, L.P.", // Investor Name
+        "Delaware", // State of Incorporation + Governing Law Jurisdiction
+        "John Carter", // Company Signatory Name
+        "Chief Executive Officer", // Company Signatory Title
+        "June 22, 2026", // Date of Safe
+      ];
+      const hasAllValues = requiredValues.every((v) => hasNorm(m, v));
+      const hasPurchaseAmount = hasNorm(m, "$500,000") || hasNorm(m, "500,000");
+      const hasValuationCap = hasNorm(m, "$15,000,000") || hasNorm(m, "15,000,000");
+
+      const placeholders = [
+        "[Company Name]",
+        "[Investor Name]",
+        "[Date of Safe]",
+        "[State of Incorporation]",
+        "[Governing Law Jurisdiction]",
+        "[_name_]",
+        "[_title_]",
+      ];
+      const noPlaceholders = placeholders.every((p) => !m.includes(p));
+      const noDollarBlanks = !/\$\[_+\]/.test(m);
 
       return (
-        hasCompany &&
-        hasInvestor &&
-        hasValuation &&
-        noCompanyPlaceholder &&
-        noInvestorPlaceholder &&
-        noDollarBlanks
+        hasAllValues && hasPurchaseAmount && hasValuationCap && noPlaceholders && noDollarBlanks
       );
     }
 
     case "party-swap": {
-      // Exact target names, normalized so "Inc"/"Inc." punctuation doesn't matter,
-      // but bare "Wayne" / "Bruce" no longer passes.
-      const hasWayne = hasNorm(modPlain, "Wayne Enterprises, Inc.");
-      const hasBruce = hasNorm(modPlain, "Bruce Wayne");
+      // The fixture is an EXECUTED contract with the prior deal's real parties baked
+      // in. Success requires a complete re-template onto the new parties with NO
+      // residual prior-party data (the realistic "old client left in the template"
+      // failure mode).
+      const m = plainText(modifiedDoc);
+      const nm = normalize(m);
 
-      const noCompanyPlaceholder = !modPlain.includes("[COMPANY NAME]");
-      const noPurchaserPlaceholder = !modPlain.includes("[PURCHASER NAME]");
+      const noOldParties =
+        !hasNorm(m, "Stark Industries") &&
+        !hasNorm(m, "Pym Particle") &&
+        !hasNorm(m, "Anthony Stark") &&
+        !m.toLowerCase().includes("starkindustries.com");
 
-      // Consistency: the swap must hit every site, not just one.
-      // Original fixture: [COMPANY NAME] appears 3x (definitions + signature),
-      // [PURCHASER NAME] appears 2x (entity + individual signature blocks).
-      // Require the new names to appear at least as often as the placeholders they replaced.
-      const wayneCount = countLiteral(normalize(modPlain), normalize("Wayne Enterprises"));
-      const bruceCount = countLiteral(normalize(modPlain), normalize("Bruce Wayne"));
-      const consistentCompany = wayneCount >= 3;
-      const consistentPurchaser = bruceCount >= 2;
+      // New parties must appear at least as often as the originals did
+      // (Company 3x, Lead investor 2x, Key Holder/founder 3x).
+      const consistentParties =
+        countLiteral(nm, normalize("Wayne Enterprises")) >= 3 &&
+        countLiteral(nm, normalize("Fox Capital Partners")) >= 2 &&
+        countLiteral(nm, normalize("Bruce Wayne")) >= 3;
 
-      return (
-        hasWayne &&
-        hasBruce &&
-        noCompanyPlaceholder &&
-        noPurchaserPlaceholder &&
-        consistentCompany &&
-        consistentPurchaser
-      );
+      return noOldParties && consistentParties;
     }
 
     case "policy-checklist-review": {
-      // The model must append a JSON summary with keys governingLaw, liabilityCap, standardTermsLink.
-      // GROUND TRUTH for this fixture:
-      //   - Governing Law is an UNFILLED placeholder "[fill in state, province, and/or country]"
-      //     => the correct determination is "unspecified/blank", NOT a hallucinated jurisdiction.
-      //   - Liability cap is the "General Cap" mechanism.
-      //   - Standard terms link is the commonpaper.com URL.
+      // The review must live IN the document as comments and/or tracked changes,
+      // addressing all three checklist points. Scored on the reviewer's ADDED
+      // content so the original body's vocabulary cannot satisfy the check.
+      if (!hasCommentsPart(modifiedDoc) && trackedChangeCount(modifiedDoc) === 0) return false;
+      const review = addedReviewText(modifiedDoc);
 
-      // Extract the LAST balanced {...} block (the appended summary lives at the end),
-      // avoiding the old greedy first-brace grab that snagged drafting artifacts.
-      const extractLastJsonObject = (text: string): string | null => {
-        const lastOpen = text.lastIndexOf("{");
-        if (lastOpen === -1) return null;
-        let depth = 0;
-        for (let i = lastOpen; i < text.length; i++) {
-          if (text[i] === "{") depth++;
-          else if (text[i] === "}") {
-            depth--;
-            if (depth === 0) return text.slice(lastOpen, i + 1);
-          }
-        }
-        // Unbalanced from lastOpen; try scanning forward from the first "{".
-        const firstOpen = text.indexOf("{");
-        if (firstOpen === -1) return null;
-        depth = 0;
-        for (let i = firstOpen; i < text.length; i++) {
-          if (text[i] === "{") depth++;
-          else if (text[i] === "}") {
-            depth--;
-            if (depth === 0) return text.slice(firstOpen, i + 1);
-          }
-        }
-        return null;
-      };
+      const blankWords = [
+        "unspecified",
+        "not specified",
+        "blank",
+        "missing",
+        "not stated",
+        "no governing",
+        "fill in",
+        "none",
+        "n/a",
+        "left blank",
+        "not filled",
+        "not been filled",
+        "not provided",
+        "not selected",
+        "not defined",
+      ];
+      const governingLawFlagged =
+        review.includes("governing law") && blankWords.some((w) => review.includes(w));
+      const liabilityAddressed =
+        review.includes("liability") ||
+        review.includes("general cap") ||
+        review.includes("cap amount") ||
+        review.includes("limitation");
+      const standardTermsAddressed =
+        review.includes("standard terms") ||
+        review.includes("common paper") ||
+        review.includes("commonpaper");
 
-      const jsonStr = extractLastJsonObject(modPlain);
-      if (!jsonStr) return false;
-
-      let obj: Record<string, unknown>;
-      try {
-        obj = JSON.parse(jsonStr);
-      } catch {
-        return false;
-      }
-
-      const keys = Object.keys(obj).map((k) => k.toLowerCase());
-      const hasGoverningLaw = keys.some(
-        (k) =>
-          k.includes("governinglaw") || k.includes("governing_law") || k.includes("governing law"),
-      );
-      const hasLiabilityCap = keys.some(
-        (k) =>
-          k.includes("liabilitycap") || k.includes("liability_cap") || k.includes("liability cap"),
-      );
-      const hasStandardTermsLink = keys.some(
-        (k) =>
-          k.includes("standardtermslink") ||
-          k.includes("standardtermsurl") ||
-          k.includes("standard_terms") ||
-          k.includes("standard terms"),
-      );
-      if (!hasGoverningLaw || !hasLiabilityCap || !hasStandardTermsLink) return false;
-
-      const getVal = (predicate: (k: string) => boolean): string => {
-        const key = Object.keys(obj).find((k) => predicate(k.toLowerCase()));
-        return key ? String(obj[key]).toLowerCase() : "";
-      };
-
-      const govVal = getVal((k) => k.includes("governing"));
-      const liabVal = getVal((k) => k.includes("liab"));
-      const termsVal = getVal((k) => k.includes("standard") || k.includes("terms"));
-
-      // Governing law: fixture is UNFILLED. Reward an honest "unspecified/blank/not specified/
-      // fill in" reading; reject hallucinated jurisdictions.
-      const governingLawOk =
-        govVal.includes("unspecified") ||
-        govVal.includes("not specified") ||
-        govVal.includes("blank") ||
-        govVal.includes("fill in") ||
-        govVal.includes("none") ||
-        govVal.includes("n/a") ||
-        govVal.includes("placeholder");
-
-      // Liability cap: must reference the General Cap mechanism, not be empty.
-      const liabilityCapOk =
-        liabVal.includes("general cap") ||
-        liabVal.includes("cap amount") ||
-        liabVal.includes("limitation") ||
-        liabVal.length > 0;
-
-      // Standard terms link: must be the real commonpaper.com URL.
-      const termsLinkOk = termsVal.includes("commonpaper.com");
-
-      return governingLawOk && liabilityCapOk && termsLinkOk;
+      return governingLawFlagged && liabilityAddressed && standardTermsAddressed;
     }
 
     case "playbook-commenting": {
-      // Verify word/comments.xml contains a comment referencing the late-payment interest cap.
-      const commentsPart = modifiedDoc.pkg.parts.find((p) => p.partname.includes("comments"));
-      const commentsXml = commentsPart ? String(commentsPart.blob).toLowerCase() : "";
-      if (!commentsXml) return false;
+      // The fixture already carries the counterparty's proposal (an 8% / statutory
+      // tracked change + comment). Success requires the reviewer to (a) keep
+      // comments present and (b) propose the playbook-conforming cap of 2.0% above
+      // the Bank of England base rate. The seed contains "8%"/"base rate"/"statutory"
+      // but NOT "2%", so the 2% proposal cleanly identifies the model's own review.
+      if (!hasCommentsPart(modifiedDoc)) return false;
+      const review = addedReviewText(modifiedDoc);
 
-      const hasInterest = commentsXml.includes("interest") || commentsXml.includes("payment");
-      // Must reference the specific playbook remedy (2% over BoE base rate) OR flag the
-      // non-conforming statutory/Commercial Debts Act basis.
-      const hasCapReference =
-        commentsXml.includes("2%") ||
-        commentsXml.includes("2.0%") ||
-        commentsXml.includes("england") ||
-        commentsXml.includes("base rate") ||
-        commentsXml.includes("commercial debts") ||
-        commentsXml.includes("statutory");
-      return hasInterest && hasCapReference;
+      const proposesTwoPercent =
+        /\b2(\.0)?\s*%/.test(review) ||
+        review.includes("2 percent") ||
+        review.includes("2 per cent");
+      const referencesBaseRate = review.includes("base rate") || review.includes("bank of england");
+      const onTopic =
+        review.includes("interest") ||
+        review.includes("late payment") ||
+        review.includes("statutory");
+
+      return proposesTwoPercent && referencesBaseRate && onTopic;
     }
 
     case "multi-file-assembly": {
-      // Both CSA (primary) and DPA must carry the synchronized variables:
-      //   Customer Name = "Wayne Enterprises, Inc."   Effective Date = "June 22, 2026".
-      // No bare-token fallbacks; no Acme leak from the form-fill scenario.
+      // Customer name and effective date are sourced from deal-intake-sheet.docx and
+      // must be propagated into BOTH the CSA (primary) and the DPA (companion).
       if (!tempFilePath) return false;
-      let tempDpaPath = tempFilePath.replace(".docx", "_dpa.docx");
-      if (!fs.existsSync(tempDpaPath)) {
-        tempDpaPath = path.join(path.dirname(tempFilePath), "dpa-module.docx");
+      let dpaPath = tempFilePath.replace(".docx", "_dpa.docx");
+      if (!fs.existsSync(dpaPath)) {
+        dpaPath = path.join(path.dirname(tempFilePath), "dpa-module.docx");
       }
-      if (!fs.existsSync(tempDpaPath)) return false;
+      if (!fs.existsSync(dpaPath)) return false;
 
       try {
-        const dpaBuffer = fs.readFileSync(tempDpaPath);
-        const dpaDoc = await DocumentObject.load(dpaBuffer);
-        const dpaPlain = new DocumentMapper(dpaDoc, true).full_text;
+        const csaPlain = plainText(modifiedDoc);
+        const dpaDoc = await DocumentObject.load(fs.readFileSync(dpaPath));
+        const dpaPlain = plainText(dpaDoc);
 
-        const hasCustomerName = hasNorm(modPlain, "Wayne Enterprises, Inc.");
-        const hasCustomerNameDpa = hasNorm(dpaPlain, "Wayne Enterprises, Inc.");
-        const hasDate = hasNorm(modPlain, "June 22, 2026");
-        const hasDateDpa = hasNorm(dpaPlain, "June 22, 2026");
+        const customer = "Wayne Enterprises, Inc.";
+        const effectiveDate = "June 22, 2026";
 
-        return hasCustomerName && hasCustomerNameDpa && hasDate && hasDateDpa;
+        return (
+          hasNorm(csaPlain, customer) &&
+          hasNorm(dpaPlain, customer) &&
+          hasNorm(csaPlain, effectiveDate) &&
+          hasNorm(dpaPlain, effectiveDate)
+        );
       } catch (err) {
         console.error("Error verifying DPA in success criteria:", err);
         return false;

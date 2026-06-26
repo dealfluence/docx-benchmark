@@ -118,15 +118,25 @@ export const MAX_TURNS = 40;
 export function buildSystemPrompt(opts: {
   toolDisplayName: string;
   docFileName: string;
-  companionDpaName?: string;
+  editableCompanions?: string[];
+  inputDocs?: string[];
   taskDescription: string;
 }): string {
-  const { toolDisplayName, docFileName, companionDpaName, taskDescription } = opts;
+  const {
+    toolDisplayName,
+    docFileName,
+    editableCompanions = [],
+    inputDocs = [],
+    taskDescription,
+  } = opts;
+  const docLines = [`- Primary document (edit this): "${docFileName}"`];
+  for (const c of editableCompanions) docLines.push(`- Additional document to edit: "${c}"`);
+  for (const i of inputDocs)
+    docLines.push(`- Input data document (read for values, do NOT edit): "${i}"`);
   return `You are an expert contract editor editing Microsoft Word documents (.docx) using the provided ${toolDisplayName} tools.
 
 Documents involved in this task:
-- Primary Document: "${docFileName}"
-${companionDpaName ? `- Companion DPA Document: "${companionDpaName}"` : ""}
+${docLines.join("\n")}
 
 Your task is: ${taskDescription}
 
@@ -743,6 +753,8 @@ export async function runToolLoop(
   scenarioId: string,
   taskDescription: string,
   tool: ResolvedToolConfig,
+  companionFiles: string[] = [],
+  inputFiles: string[] = [],
 ): Promise<LoopResult> {
   logInfo(tool.displayName, `Initializing loop session for scenario '${scenarioId}'...`);
 
@@ -759,14 +771,22 @@ export async function runToolLoop(
   const tempFilePath = path.join(sessionDir, docFileName).replace(/\\/g, "/");
   fs.copyFileSync(docPath, tempFilePath);
 
-  let tempDpaPath: string | undefined = undefined;
-  if (scenarioId === "multi-file-assembly") {
-    const dpaSourcePath = path.resolve(path.dirname(docPath), "dpa-module.docx");
-    if (fs.existsSync(dpaSourcePath)) {
-      tempDpaPath = path.join(sessionDir, "dpa-module.docx").replace(/\\/g, "/");
-      fs.copyFileSync(dpaSourcePath, tempDpaPath);
+  // Copy every companion (editable) and input (read-only) doc into the isolated
+  // session so the model can read/edit them by basename. The path-isolation guard
+  // rewrites .docx args to this session dir, so basenames resolve here.
+  const copyCompanion = (sourcePath: string): string | undefined => {
+    const resolvedSource = path.resolve(sourcePath);
+    if (!fs.existsSync(resolvedSource)) {
+      logWarn(tool.displayName, `Companion/input file not found, skipping: ${resolvedSource}`);
+      return undefined;
     }
-  }
+    const base = path.basename(resolvedSource);
+    const dest = path.join(sessionDir, base).replace(/\\/g, "/");
+    fs.copyFileSync(resolvedSource, dest);
+    return base;
+  };
+  const editableCompanions = companionFiles.map(copyCompanion).filter((b): b is string => !!b);
+  const inputDocs = inputFiles.map(copyCompanion).filter((b): b is string => !!b);
 
   const { mcpClient, tools: mcpTools } = await connectMcpClient(
     { command: tool.command, args: tool.args, env: tool.env },
@@ -776,7 +796,8 @@ export async function runToolLoop(
   const systemPrompt = buildSystemPrompt({
     toolDisplayName: tool.displayName,
     docFileName,
-    companionDpaName: tempDpaPath ? "dpa-module.docx" : undefined,
+    editableCompanions,
+    inputDocs,
     taskDescription,
   });
   const originalDoc = await DocumentObject.load(fs.readFileSync(docPath));

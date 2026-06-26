@@ -188,6 +188,8 @@ async function runSingleTrial(plan: TrialPlan): Promise<TrialOutcome> {
           scenario.id,
           fullTaskDescription,
           tool,
+          scenario.companionFiles ?? [],
+          scenario.inputFiles ?? [],
         );
         loopResTempFilePath = loopRes.tempFilePath;
         tokensIn = loopRes.tokensIn;
@@ -217,10 +219,17 @@ async function runSingleTrial(plan: TrialPlan): Promise<TrialOutcome> {
               scenario.id,
               loopResTempFilePath,
             );
-            success = evalResult.success;
+            // A case counts as success ONLY if the model explicitly submitted via
+            // complete_task (loopRes.success is set only when complete_task passes
+            // the validation gate) AND the final document independently passes
+            // evaluation. A correct document that was never formally submitted does
+            // not pass.
+            success = loopRes.success && evalResult.success;
             fidelity = evalResult.fidelity;
             xmlDelta = evalResult.xmlDelta;
             xmlIntegrity = evalResult.xmlIntegrity;
+
+            preserveTrialOutputs(trialId, exported, loopResTempFilePath);
           }
         }
       } catch (e: unknown) {
@@ -295,6 +304,34 @@ function errorTrial(rep: number, latencyMs: number, error: string): SingleTrialR
     completeTaskCalls: 0,
     error,
   };
+}
+
+/**
+ * When BENCHMARK_KEEP_OUTPUTS is set, copies the trial's final primary document
+ * (and the DPA companion, if any) to results/outputs/<trialId>.docx so the
+ * produced documents can be inspected after the run (they are otherwise deleted).
+ */
+function preserveTrialOutputs(
+  trialId: string,
+  primaryBuffer: Buffer,
+  primaryTempPath: string | undefined,
+): void {
+  if (!process.env.BENCHMARK_KEEP_OUTPUTS) return;
+  try {
+    const outDir = path.join("./results", "outputs");
+    fs.mkdirSync(outDir, { recursive: true });
+    const safe = trialId.replace(/[^a-z0-9._-]+/gi, "_");
+    fs.writeFileSync(path.join(outDir, `${safe}.docx`), primaryBuffer);
+    if (primaryTempPath) {
+      const dpa = path.join(path.dirname(primaryTempPath), "dpa-module.docx");
+      if (fs.existsSync(dpa)) {
+        fs.copyFileSync(dpa, path.join(outDir, `${safe}_dpa.docx`));
+      }
+    }
+    console.log(`${getTimestamp()} [INFO] Preserved output: results/outputs/${safe}.docx`);
+  } catch (e) {
+    console.warn(`${getTimestamp()} [WARNING] Failed to preserve outputs for ${trialId}: ${e}`);
+  }
 }
 
 /** Removes the trial's temp doc plus any companion DPA copies. */

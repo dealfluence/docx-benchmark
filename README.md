@@ -22,13 +22,13 @@ Detailed design choices, cost formulas, and scoring rules are documented in the 
 
 ## Scenarios Measured
 
-Scenarios are data-driven and defined in [`src/scenarios.ts`](src/scenarios.ts):
+Scenarios are data-driven and defined in [`src/scenarios.ts`](src/scenarios.ts). Each targets one document-handling capability; several require reading a separate **input document** for their data (so the task is finding-and-placing, not transcribing from the prompt):
 
-1.  **Form Fill (`form-fill`)**: Populate placeholders in a Post-Money SAFE template with supplied deal data, leaving no blanks behind.
-2.  **Contract Clone & Party Swap (`party-swap`)**: Globally swap contracting-party placeholders consistently across a Series Seed Investment Agreement.
-3.  **Policy Checklist Review (`policy-checklist-review`)**: Analyze a Cloud Service Agreement against a 3-point checklist and append a JSON review summary.
-4.  **Playbook-based Commenting (`playbook-commenting`)**: Locate a non-conforming late-payment interest clause and insert an OOXML margin comment with playbook feedback.
-5.  **Multi-file Deal Assembly (`multi-file-assembly`)**: Propagate synchronized variables across both a CSA and its companion DPA in one transactional run.
+1.  **Form Fill (`form-fill`)**: Read a deal **data sheet** and fill *every* placeholder in a Post-Money SAFE template — leaving no bracketed placeholder or blank behind.
+2.  **Template Reuse & Party Swap (`party-swap`)**: Re-template an **executed** Series Seed agreement (real prior parties baked in) onto new parties, consistently everywhere. A single leftover prior-party reference is a failure.
+3.  **Policy Checklist Review (`policy-checklist-review`)**: Redline and **comment in place** against a 3-point checklist on a Cloud Service Agreement — no external output or summary.
+4.  **Playbook Review of Counterparty Redlines (`playbook-commenting`)**: The fixture arrives with the counterparty's proposed **tracked changes + comments**; review them against the negotiation playbook (late-payment interest must be 2.0% over the Bank of England base rate, not statutory) using your own redlines/comments.
+5.  **Multi-file Deal Assembly (`multi-file-assembly`)**: Read a deal **intake sheet** and propagate its values (Customer, Effective Date) into both the Cloud Service Agreement and its companion Data Processing Agreement.
 
 ---
 

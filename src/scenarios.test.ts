@@ -15,7 +15,7 @@ describe("scenarios v2", () => {
     const s2 = scenarios.find((s) => s.id === "party-swap");
     expect(s2).toBeDefined();
     expect(s2?.isAgentic).toBe(true);
-    expect(s2?.fixturePath).toBe("fixtures/series-seed/investment-agreement.docx");
+    expect(s2?.fixturePath).toBe("fixtures/series-seed/investment-agreement-executed.docx");
 
     const s3 = scenarios.find((s) => s.id === "policy-checklist-review");
     expect(s3).toBeDefined();
@@ -25,11 +25,16 @@ describe("scenarios v2", () => {
     const s4 = scenarios.find((s) => s.id === "playbook-commenting");
     expect(s4).toBeDefined();
     expect(s4?.isAgentic).toBe(true);
-    expect(s4?.fixturePath).toBe("fixtures/uk-gov/model-services-contract.docx");
+    expect(s4?.fixturePath).toBe("fixtures/uk-gov/model-services-contract-redlined.docx");
 
     const s5 = scenarios.find((s) => s.id === "multi-file-assembly");
     expect(s5).toBeDefined();
     expect(s5?.isAgentic).toBe(true);
     expect(s5?.fixturePath).toBe("fixtures/common-paper/cloud-service-agreement.docx");
+
+    // Scenarios that source data from / edit additional documents declare them.
+    expect(s1?.inputFiles).toContain("fixtures/ycombinator/deal-data-sheet.docx");
+    expect(s5?.companionFiles).toContain("fixtures/common-paper/dpa-module.docx");
+    expect(s5?.inputFiles).toContain("fixtures/common-paper/deal-intake-sheet.docx");
   });
 });

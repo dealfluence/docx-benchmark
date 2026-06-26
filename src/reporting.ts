@@ -67,15 +67,8 @@ export function getStats(arr: number[]): Stats {
 export function getFullTaskDescription(
   scenario: Partial<Scenario> & { description: string },
 ): string {
-  let desc = scenario.description;
-  if (scenario.targetText || scenario.replacementText || scenario.reviewAction) {
-    desc += `\nInstructions:\n`;
-    if (scenario.targetText) desc += `- Find target text: "${scenario.targetText}"\n`;
-    if (scenario.replacementText) desc += `- Replace with: "${scenario.replacementText}"\n`;
-    if (scenario.reviewAction)
-      desc += `- Review Action: ${JSON.stringify(scenario.reviewAction)}\n`;
-  }
-  return desc;
+  // The scenario description is now the complete, self-contained task instruction.
+  return scenario.description;
 }
 
 export function formatTokenMetric(

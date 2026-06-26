@@ -145,81 +145,79 @@ describe("F4 Guard Test: Token Summing", () => {
 });
 
 describe("F6 Guard Test: Success Discriminates", () => {
-  let docPath: string;
   let buffer: Buffer;
   let originalDoc: DocumentObject;
 
   beforeAll(async () => {
-    docPath = getGoldenDocxPath();
-    buffer = fs.readFileSync(docPath);
+    // originalDoc is unused by the current criteria (all checks read the modified
+    // doc / companion paths); any valid doc serves as the baseline argument.
+    buffer = fs.readFileSync(getGoldenDocxPath());
     originalDoc = await DocumentObject.load(buffer);
   });
 
-  it("F6: form-fill evaluates dynamically and correctly", async () => {
+  it("F6: form-fill requires every field filled and no placeholders left", async () => {
     const passForm = await createStrippedDoc(
       buffer,
-      "This Safe certifies that Acme Corporate Technologies, Inc. issues to Jane Founder of 15,000,000.",
+      "This Safe certifies that Acme Robotics, Inc., a Delaware corporation, issues to " +
+        "Vertex Seed Fund, L.P. of $500,000 (the Purchase Amount) on June 22, 2026. " +
+        "The Post-Money Valuation Cap is $15,000,000. Governed by the laws of Delaware. " +
+        "Signed: John Carter, Chief Executive Officer.",
     );
+    // Missing nothing but a single bracketed placeholder left behind => fail.
     const failForm = await createStrippedDoc(
       buffer,
-      "This Safe certifies that [Company Name] of 15,000,000.",
+      "This Safe certifies that Acme Robotics, Inc., a Delaware corporation, issues to " +
+        "Vertex Seed Fund, L.P. of $500,000 on [Date of Safe]. The Post-Money Valuation Cap " +
+        "is $15,000,000. Governed by Delaware. Signed: John Carter, Chief Executive Officer.",
     );
     expect(await checkScenarioSuccess("form-fill", originalDoc, passForm)).toBe(true);
     expect(await checkScenarioSuccess("form-fill", originalDoc, failForm)).toBe(false);
   });
 
-  it("F6: party-swap evaluates dynamically and correctly", async () => {
+  it("F6: party-swap requires all new parties and zero leftover prior parties", async () => {
     const passParty = await createStrippedDoc(
       buffer,
-      "Wayne Enterprises, Inc. Wayne Enterprises, Inc. Wayne Enterprises, Inc. agrees to pay Bruce Wayne and Bruce Wayne the sum.",
+      "Between Wayne Enterprises, Inc. and Fox Capital Partners, L.P. Wayne Enterprises, Inc. " +
+        "issues to Fox Capital Partners, L.P. Signed Bruce Wayne. Wayne Enterprises, Inc. and " +
+        "Bruce Wayne and Bruce Wayne, bruce@wayne.enterprises.",
     );
+    // A single leftover prior-party reference => fail, even with new parties present.
     const failParty = await createStrippedDoc(
       buffer,
-      "This is dated as of and is between [COMPANY NAME] and [PURCHASER NAME].",
+      "Between Wayne Enterprises, Inc. and Fox Capital Partners, L.P. Wayne Enterprises, Inc. " +
+        "issues to Fox Capital Partners, L.P. Signed Bruce Wayne, Bruce Wayne. " +
+        "Notice: Stark Industries, Inc. remains in the signature block.",
     );
     expect(await checkScenarioSuccess("party-swap", originalDoc, passParty)).toBe(true);
     expect(await checkScenarioSuccess("party-swap", originalDoc, failParty)).toBe(false);
   });
 
-  it("F6: policy-checklist-review evaluates dynamically and correctly", async () => {
-    const passPolicy = await createStrippedDoc(
-      buffer,
-      `Checklist review results: { "governingLaw": "unspecified", "liabilityCap": "General Cap", "standardTermsLink": "https://commonpaper.com/standards" }`,
+  it("F6: policy-checklist-review fails on an unreviewed document (no comments/redlines)", async () => {
+    // The pristine CSA carries no comments or tracked changes -> must not pass.
+    const csa = await DocumentObject.load(
+      fs.readFileSync("fixtures/common-paper/cloud-service-agreement.docx"),
     );
-    const failPolicy = await createStrippedDoc(
-      buffer,
-      `Checklist review results: { "someKey": "value" }`,
-    );
-    expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, passPolicy)).toBe(
-      true,
-    );
-    expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, failPolicy)).toBe(
-      false,
-    );
+    expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, csa)).toBe(false);
   });
 
-  it("F6: playbook-commenting evaluates dynamically and correctly", async () => {
-    const passComment = await createStrippedDoc(buffer, "Plain text document content");
-    passComment.pkg.parts.push({
-      partname: "word/comments.xml",
-      blob: `<?xml version="1.0" encoding="UTF-8"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:comment w:id="1"><w:p><w:r><w:t>Late payment interest rate should be capped at 2.0% above Bank of England base rate, not statutory.</w:t></w:r></w:p></w:comment></w:comments>`,
-    } as any);
-    const failComment = await createStrippedDoc(buffer, "Plain text document content");
-    expect(await checkScenarioSuccess("playbook-commenting", originalDoc, passComment)).toBe(true);
-    expect(await checkScenarioSuccess("playbook-commenting", originalDoc, failComment)).toBe(false);
+  it("F6: playbook-commenting fails on the seeded fixture before the model reviews it", async () => {
+    // The redlined fixture has the counterparty's 8%/statutory proposal but no 2%
+    // conforming counter-proposal yet, so it must not pass until the model reviews.
+    const seeded = await DocumentObject.load(
+      fs.readFileSync("fixtures/uk-gov/model-services-contract-redlined.docx"),
+    );
+    expect(await checkScenarioSuccess("playbook-commenting", originalDoc, seeded)).toBe(false);
   });
 
-  it("F6: multi-file-assembly evaluates dynamically and correctly", async () => {
+  it("F6: multi-file-assembly requires the values in BOTH the CSA and the DPA", async () => {
     const tempFilePath = "./temp_test_live_scenario5.docx";
     const tempDpaPath = "./temp_test_live_scenario5_dpa.docx";
 
-    // Create temporary DPA mock file
     const dpaDoc = await createStrippedDoc(
       buffer,
       "Wayne Enterprises, Inc. and June 22, 2026 dpa details",
     );
-    const dpaExport = await dpaDoc.save();
-    fs.writeFileSync(tempDpaPath, dpaExport);
+    fs.writeFileSync(tempDpaPath, await dpaDoc.save());
 
     const passCsa = await createStrippedDoc(
       buffer,
@@ -231,7 +229,8 @@ describe("F6 Guard Test: Success Discriminates", () => {
         await checkScenarioSuccess("multi-file-assembly", originalDoc, passCsa, tempFilePath),
       ).toBe(true);
 
-      const failCsa = await createStrippedDoc(buffer, "Missing Wayne details");
+      // DPA present but CSA missing the values => fail.
+      const failCsa = await createStrippedDoc(buffer, "Customer name and date are missing here");
       expect(
         await checkScenarioSuccess("multi-file-assembly", originalDoc, failCsa, tempFilePath),
       ).toBe(false);

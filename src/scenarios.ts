@@ -1,68 +1,99 @@
 export interface Scenario {
   id: string;
   name: string;
+  /**
+   * The full task instruction handed to the model. For scenarios that source
+   * their data from an input document, this deliberately does NOT contain the
+   * literal values — the model must read them from the `inputFiles`.
+   */
   description: string;
-  targetText: string;
-  replacementText: string;
-  comment?: string;
-  reviewAction?: {
-    type: "accept" | "reject" | "reply";
-    targetId: string;
-    payload?: string;
-  };
-  isAgentic?: boolean;
+  /** Primary document the model edits. */
   fixturePath: string;
+  /**
+   * Additional documents the model is also expected to edit (copied into the
+   * session and named in the prompt). Example: the DPA in multi-file assembly.
+   */
+  companionFiles?: string[];
+  /**
+   * Read-only source documents the model must consult for data (copied into the
+   * session and named in the prompt as inputs, not edit targets). Example: a
+   * deal data sheet whose values must be transcribed into the contract.
+   */
+  inputFiles?: string[];
+  isAgentic?: boolean;
 }
 
 export const scenarios: Scenario[] = [
   {
     id: "form-fill",
-    name: "Form Fill (SAFE Deal Data)",
+    name: "Form Fill (SAFE from Data Sheet)",
     description:
-      "Populate the placeholders in the Post-Money SAFE template with this deal data: the Company Name is 'Acme Corporate Technologies, Inc.', the Investor Name is 'Jane Founder', and the Post-Money Valuation Cap is '$15,000,000'. Leave no unfilled placeholder remaining.",
-    targetText: "",
-    replacementText: "",
-    isAgentic: true,
+      "Complete the Post-Money SAFE template using ONLY the data provided in the accompanying deal data sheet. " +
+      "Read the data sheet, then fill in every placeholder in the SAFE — the company name, state of incorporation, " +
+      "investor name, purchase amount, post-money valuation cap, date, governing-law jurisdiction, and the company " +
+      "signature block (signatory name and title) — with the matching value from the sheet. " +
+      "Every bracketed placeholder and every blank ($[_____________]) must be replaced; leave nothing unfilled.",
     fixturePath: "fixtures/ycombinator/post-money-safe.docx",
+    inputFiles: ["fixtures/ycombinator/deal-data-sheet.docx"],
+    isAgentic: true,
   },
   {
     id: "party-swap",
-    name: "Contract Clone & Party Swap (Investment Agreement)",
+    name: "Template Reuse & Party Swap (Executed Agreement)",
     description:
-      "Globally swap contracting party details throughout the Series Seed Investment Agreement: change every occurrence of the placeholder '[COMPANY NAME]' to 'Wayne Enterprises, Inc.' and every occurrence of '[PURCHASER NAME]' to 'Bruce Wayne'. The swap must be applied consistently at all of places, leaving no placeholder behind.",
-    targetText: "",
-    replacementText: "",
+      "This executed Series Seed Investment Agreement is being reused as the template for a brand-new financing. " +
+      "Replace every reference to the prior deal's parties with the new parties, consistently throughout the entire " +
+      "document (defined terms, body, schedules/tables, signature blocks, and notice email addresses):\n" +
+      "- Company: 'Stark Industries, Inc.' becomes 'Wayne Enterprises, Inc.'\n" +
+      "- Lead investor: 'Pym Particle Ventures, L.P.' becomes 'Fox Capital Partners, L.P.'\n" +
+      "- Key Holder / founder: 'Anthony Stark' becomes 'Bruce Wayne'\n" +
+      "- Update the notice email address 'anthony@starkindustries.com' to 'bruce@wayne.enterprises'.\n" +
+      "No trace of the prior parties may remain anywhere in the document — a single leftover reference is a failure.",
+    fixturePath: "fixtures/series-seed/investment-agreement-executed.docx",
     isAgentic: true,
-    fixturePath: "fixtures/series-seed/investment-agreement.docx",
   },
   {
     id: "policy-checklist-review",
-    name: "Policy Checklist Review (CSA Analysis)",
+    name: "Policy Checklist Review (In-place Redline)",
     description:
-      "Analyze the Cloud Service Agreement against a 3-point legal compliance checklist: (1) Governing Law, (2) Limitation of Liability cap, and (3) Standard Terms URL. Append the final results as a clean JSON review summary at the very end of the document using keys 'governingLaw', 'liabilityCap', and 'standardTermsLink'.",
-    targetText: "",
-    replacementText: "",
-    isAgentic: true,
+      "Review this Cloud Service Agreement against a 3-point compliance checklist and record your findings DIRECTLY " +
+      "in the document using margin comments and, where a fix is warranted, tracked-change edits. Do NOT produce any " +
+      "separate file, summary, or appended text block — all findings must live as comments/redlines anchored to the " +
+      "relevant clauses. The three checklist points are:\n" +
+      "1. Governing Law — state whether a governing law is actually specified.\n" +
+      "2. Limitation of Liability — identify the liability cap (the 'General Cap') mechanism and its amount.\n" +
+      "3. Standard Terms — confirm the agreement incorporates the Common Paper Standard Terms.\n" +
+      "Attach one comment per checklist point to the clause it concerns.",
     fixturePath: "fixtures/common-paper/cloud-service-agreement.docx",
+    isAgentic: true,
   },
   {
     id: "playbook-commenting",
-    name: "Playbook-based Commenting (Late Payment Interest Cap)",
+    name: "Playbook Review of Counterparty Redlines",
     description:
-      "Review the Model Services Contract against a specific corporate playbook rule: 'The interest rate for late payments must not refer to statutory rates under the Late Payment of Commercial Debts Act 1998. It must be explicitly capped at 2.0% above the Bank of England base rate per annum.' Locate the non-conforming late payment interest reference in the contract and insert an OOXML margin comment anchored to that text run containing the playbook feedback.",
-    targetText: "",
-    replacementText: "",
+      "The Supplier's counsel has returned this Model Services Contract with proposed redlines and margin comments " +
+      "(tracked changes already present in the document). Review their proposals against our negotiation playbook rule:\n" +
+      "'Interest on late payments must NOT rely on the statutory rate under the Late Payment of Commercial Debts " +
+      "(Interest) Act 1998. It must be explicitly capped at 2.0% above the Bank of England base rate per annum.'\n" +
+      "Find the late-payment interest clause and the counterparty's proposal affecting it. Where it violates the " +
+      "playbook, respond using margin comments and tracked-change edits: flag the non-conforming statutory-rate basis " +
+      "and propose conforming wording (2.0% above the Bank of England base rate). Preserve the counterparty's existing " +
+      "tracked changes and comments — add your review on top of them, do not discard them.",
+    fixturePath: "fixtures/uk-gov/model-services-contract-redlined.docx",
     isAgentic: true,
-    fixturePath: "fixtures/uk-gov/model-services-contract.docx",
   },
   {
     id: "multi-file-assembly",
-    name: "Multi-file Deal Assembly (Consistent CSA & DPA)",
+    name: "Multi-file Deal Assembly (from Intake Sheet)",
     description:
-      "Ensure cross-document consistency by propagating a synchronized set of variables ('Wayne Enterprises, Inc.' as Customer Name, and 'June 22, 2026' as Effective Date) across both the Cloud Service Agreement (CSA) and the Data Processing Agreement (DPA) in a single transactional run.",
-    targetText: "",
-    replacementText: "",
-    isAgentic: true,
+      "A deal intake sheet accompanies this task. Read it to obtain the deal variables, then propagate those values " +
+      "consistently into BOTH the Cloud Service Agreement (the primary document) AND the companion Data Processing " +
+      "Agreement 'dpa-module.docx': set the Customer name and the Effective Date wherever they belong in each document. " +
+      "Both documents must end up carrying the same Customer name and Effective Date taken from the intake sheet. " +
+      "Save both documents.",
     fixturePath: "fixtures/common-paper/cloud-service-agreement.docx",
+    companionFiles: ["fixtures/common-paper/dpa-module.docx"],
+    inputFiles: ["fixtures/common-paper/deal-intake-sheet.docx"],
+    isAgentic: true,
   },
 ];
