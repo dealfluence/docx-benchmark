@@ -62,6 +62,7 @@ export interface Schema {
   items?: Schema;
   description?: string;
   enum?: string[];
+  const?: unknown;
 }
 
 export function mapSchemaType(type: string): Type {
@@ -77,6 +78,17 @@ export function cleanSchema(schema: Schema | undefined): Schema | undefined {
   const res: Schema = { ...schema };
   delete res.$schema;
   delete res.additionalProperties;
+
+  // Gemini's function-calling schema dialect has no `const`. Pydantic `Literal`
+  // discriminators (e.g. a discriminated-union `type` field) serialize to
+  // `const`, which the API rejects outright. Convert to a single-value `enum`,
+  // which Gemini accepts and which carries the same "must equal this" meaning.
+  // (Our Node server avoids this by declaring the discriminator as an enum;
+  // this keeps the harness working for any BYO server that uses `const`.)
+  if (res.const !== undefined) {
+    if (res.enum === undefined) res.enum = [String(res.const)];
+    delete res.const;
+  }
 
   const unionList = schema.anyOf || schema.oneOf;
   if (unionList) {
