@@ -74,6 +74,13 @@ export interface LoopConfig {
   getFinalBuffer: () => Promise<Buffer>;
   cleanup?: () => Promise<void>;
   loopName?: string;
+  /**
+   * When true, a tools-disabled "think aloud" planning step is inserted before
+   * every action step: the model must state its next action without taking it,
+   * then the following step lets it act. Doubles the step count, so pair with a
+   * larger maxTurns.
+   */
+  thinkAloud?: boolean;
 }
 
 export function middleTruncate(str: string, maxLength = 500): string {
@@ -107,7 +114,14 @@ export function logError(prefix: string, message: string, err?: unknown) {
   }
 }
 
-export const MAX_TURNS = 40;
+export const MAX_TURNS = 80;
+
+/**
+ * Appended to the system prompt during a think-aloud planning step. The model has
+ * NO tools in this step, so it cannot act — it must articulate its next move.
+ */
+export const THINK_ALOUD_SUFFIX = `PLANNING STEP — DO NOT CALL ANY TOOL IN THIS STEP.
+The tools are listed for your reference so you can name them precisely, but you MUST NOT invoke any tool here — output text only. Think aloud and state, in a few concise sentences, the single next action you will take and why: name the exact tool you will call next and the specific target/arguments you will use. Your VERY NEXT step will be the tool call in which you carry out exactly this planned action. (Any tool call you attempt in this planning step is ignored and not executed.)`;
 
 /**
  * Builds the neutral, paradigm-symmetric system prompt. Both loops receive an
@@ -298,6 +312,94 @@ export function initLoopStats(config: LoopConfig): LoopStats {
   };
 }
 
+/**
+ * A tools-disabled "think aloud" planning step. The model is called with NO tools
+ * and a planning-only system prompt, so it must state its next action as text
+ * rather than act. Its plan is appended to the conversation, followed by a short
+ * user nudge to act — keeping strict user/model alternation and cueing the
+ * following (tool-enabled) step. Tokens count toward the totals; no tool round-trip
+ * is recorded (this step makes no tool call).
+ */
+export async function executeThinkStep(
+  step: number,
+  config: LoopConfig,
+  contents: Content[],
+  stats: LoopStats,
+): Promise<void> {
+  const prefix = `Plan ${step}`;
+  logInfo(prefix, `Dispatching think-aloud planning call...`);
+  // Tools ARE registered here so the model plans with accurate tool names, but the
+  // system prompt forbids calling them and any tool call it emits is discarded
+  // below (never executed) — so the step is action-free either way.
+  const response = await generateContentWithRetry(
+    config.gemini,
+    config.modelName,
+    contents,
+    `${config.systemPrompt}\n\n${THINK_ALOUD_SUFFIX}`,
+    config.tools,
+  ).catch((err) => {
+    logError(prefix, `think-aloud generateContent failed or was aborted!`, err);
+    throw err;
+  });
+
+  const promptTokens = response.usageMetadata?.promptTokenCount || 0;
+  const candidateTokens = response.usageMetadata?.candidatesTokenCount || 0;
+  stats.tokensIn += promptTokens;
+  stats.tokensOut += candidateTokens;
+  // No tool schemas are sent in a planning step, so attribute the prompt to
+  // re-sent history plus genuinely new content (keeps the breakdown summing to
+  // tokensIn without inflating the schema floor).
+  const hTokens = Math.min(stats.historyAccumulated, promptTokens);
+  const nTokens = promptTokens - hTokens;
+  stats.historyTokens += hTokens;
+  stats.newContentTokens += nTokens;
+  stats.historyAccumulated = hTokens + nTokens + candidateTokens;
+
+  const parts = response.candidates?.[0]?.content?.parts || [];
+  let planText = parts
+    .filter((p: Part) => p.text)
+    .map((p: Part) => p.text!.trim())
+    .filter(Boolean)
+    .join("\n");
+
+  // Defensive: if the model ignored the instruction and emitted tool calls during
+  // planning, do NOT execute or append them (appending function-call parts without
+  // matching responses would also corrupt the conversation). Capture their intent
+  // as plan text instead so the signal isn't lost.
+  const attemptedCalls = response.functionCalls || [];
+  if (attemptedCalls.length > 0) {
+    logWarn(
+      prefix,
+      `Model attempted ${attemptedCalls.length} tool call(s) during planning; ignored (not executed).`,
+    );
+    if (!planText) {
+      planText =
+        "Planned next action: " +
+        attemptedCalls.map((fc) => `${fc.name}(${JSON.stringify(fc.args)})`).join("; ");
+    }
+  }
+
+  // Append ONLY the plan text (never the function-call parts) to keep the
+  // conversation well-formed and tool-call-free during planning.
+  appendAndLog(prefix, contents, {
+    role: "model",
+    parts: [{ text: planText || "(no plan articulated)" }],
+  });
+  appendAndLog(prefix, contents, {
+    role: "user",
+    parts: [{ text: "Now carry out exactly that next action using the appropriate tool." }],
+  });
+
+  console.log(
+    JSON.stringify({
+      timestamp: new Date().toISOString(),
+      step,
+      kind: "plan",
+      plan: middleTruncate(planText, 600) || undefined,
+    }),
+  );
+}
+
 export async function executeTurn(
   turn: number,
   config: LoopConfig,
@@ -423,8 +525,17 @@ export async function runAgenticLoop(config: LoopConfig): Promise<LoopResult> {
   let finalBuffer: Buffer | null = null;
 
   try {
-    for (let turn = 1; turn <= config.maxTurns; turn++) {
-      if ((await executeTurn(turn, config, contents, stats)).shouldBreak) {
+    let step = 0;
+    while (step < config.maxTurns) {
+      // Optional tools-disabled planning step: force the model to articulate its
+      // next action before it is allowed to take one.
+      if (config.thinkAloud) {
+        step++;
+        await executeThinkStep(step, config, contents, stats);
+        if (step >= config.maxTurns) break;
+      }
+      step++;
+      if ((await executeTurn(step, config, contents, stats)).shouldBreak) {
         break;
       }
     }
@@ -755,6 +866,7 @@ export async function runToolLoop(
   tool: ResolvedToolConfig,
   companionFiles: string[] = [],
   inputFiles: string[] = [],
+  thinkAloud = false,
 ): Promise<LoopResult> {
   logInfo(tool.displayName, `Initializing loop session for scenario '${scenarioId}'...`);
 
@@ -808,6 +920,7 @@ export async function runToolLoop(
     modelName,
     systemPrompt,
     maxTurns: MAX_TURNS,
+    thinkAloud,
     tools: [...mapToGeminiTools(mcpTools), COMPLETE_TASK_TOOL],
     loopName: tool.displayName,
     executeTool: makeMcpToolExecutor(mcpClient, sessionDir, {

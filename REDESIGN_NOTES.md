@@ -184,6 +184,25 @@ does) still passes. If the intended deliverable is a *clean finished document*,
 success could additionally require no pending tracked changes for those scenarios
 (while the **redline** cases — policy, playbook — should of course keep them).
 
+## Base-integrity & size invariants (added)
+
+Every scenario's success gate now also requires the output to still BE the original
+document with the task applied on top, via `baseIntact(original, modified, anchors)`
+in `success.ts`:
+- **Size floor:** modified plain-text length >= 70% of the original's (`MIN_SIZE_RATIO`).
+  Catches truncation / overwrite-with-a-smaller-doc.
+- **Anchor presence:** distinctive original content the task must not remove:
+  form-fill "Post-Money Valuation Cap"; party-swap "Series Seed Preferred Stock";
+  policy & multi-file CSA "Order Form" + "Subscription Period" (both 0× in the DPA);
+  playbook "the Authority" + "the Supplier"; multi-file DPA "Processor" (DPA-unique)
+  plus a size floor vs the DPA fixture.
+
+This directly closes the multi-file false positive: re-evaluating the last run's
+preserved outputs, **safe-docx/multi-file flips PASS -> FAIL** (its CSA was
+overwritten with DPA bytes — fails the "Order Form" anchor and the size floor),
+while every legitimate pass is unchanged. (Note: the playbook lenient-comment
+blind spot from CASE_ANALYSIS.md §4 is NOT yet addressed — see follow-ups.)
+
 ## Possible follow-ups
 - `fidelity.ts` still has a dead `negotiation-cleanup` branch (no such scenario) —
   harmless, left as-is.

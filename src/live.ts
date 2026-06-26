@@ -51,6 +51,11 @@ const getFlagReps = () => {
 const isQuick = process.argv.includes("--quick");
 let reps = getFlagReps() ?? getEnvReps() ?? (isQuick ? 1 : 5);
 
+// When enabled, each action step is preceded by a tools-disabled "think aloud"
+// planning step (see runAgenticLoop). Toggle via --think-aloud or BENCHMARK_THINK_ALOUD.
+const thinkAloud =
+  process.argv.includes("--think-aloud") || process.env.BENCHMARK_THINK_ALOUD === "1";
+
 // How many trials (scenario x tool x rep) run concurrently. All trials across all
 // reps are flattened into a single queue, so a free worker pulls the next trial
 // regardless of rep (no barrier between rep sets). Each trial spawns its own MCP
@@ -190,6 +195,7 @@ async function runSingleTrial(plan: TrialPlan): Promise<TrialOutcome> {
           tool,
           scenario.companionFiles ?? [],
           scenario.inputFiles ?? [],
+          thinkAloud,
         );
         loopResTempFilePath = loopRes.tempFilePath;
         tokensIn = loopRes.tokensIn;
@@ -423,7 +429,9 @@ export async function runLiveBenchmark() {
     `${getTimestamp()} [INFO] Configured Providers: ${clients.map((c) => c.provider + " (" + c.model + ")").join(", ")}`,
   );
   console.log(`${getTimestamp()} [INFO] Tools under test: ${tools.map((t) => t.id).join(", ")}`);
-  console.log(`${getTimestamp()} [INFO] Repetitions (N): ${reps} | Concurrency: ${concurrency}\n`);
+  console.log(
+    `${getTimestamp()} [INFO] Repetitions (N): ${reps} | Concurrency: ${concurrency} | Think-aloud: ${thinkAloud ? "ON" : "off"}\n`,
+  );
 
   // Flatten provider x tool x scenario x rep into independent trials, then run
   // them through a bounded concurrency pool.

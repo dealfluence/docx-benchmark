@@ -133,7 +133,7 @@ This division provides an honest metric separating conversation architecture ove
 To ensure a rigorous and balanced comparison between all four paradigms, the agentic execution loops adhere to strict standardization principles:
 
 ### 5.1 Unified Conversational Turn Limits
-All tool-under-test agentic loops run through a single shared implementation (`runToolLoop`) restricted to an identical maximum turn cap of **`MAX_TURNS = 40`**. Turn limits are applied symmetrically to eliminate runtime biases.
+All tool-under-test agentic loops run through a single shared implementation (`runToolLoop`) restricted to an identical maximum step cap of **`MAX_TURNS = 80`**. Step limits are applied symmetrically to eliminate runtime biases. An optional think-aloud mode inserts a tools-disabled planning step before each action step (so ~40 actions + ~40 plans within the 80-step ceiling).
 
 ### 5.2 Single-Path Schema Normalization
 Tool definitions originating from third-party MCP servers undergo standard dynamic schema normalization in `cleanSchema` before being registered with Google Gemini. This translation process enforces:

@@ -61,7 +61,7 @@ To make an honest architectural comparison with multi-turn loops, `safe-docx` to
 Both **Total Tokens** and the **`newContentTokens` floor** are reported to distinguish platform overhead from core document handling.
 
 ### 3.3 Unified Loop Turn Limit
-All tool-under-test agentic loops are governed by a unified execution ceiling of `MAX_TURNS = 40` conversational turns to eliminate execution biases.
+All tool-under-test agentic loops are governed by a unified execution ceiling of `MAX_TURNS = 80` steps to eliminate execution biases. With the optional think-aloud mode (`--think-aloud`), each action step is preceded by a tools-disabled planning step, so the 80-step ceiling spans roughly 40 action steps plus 40 planning steps.
 
 ### 3.4 Tool Call Observability
 Multi-turn agent executions must report intermediate steps as single-line structured JSON objects rather than scattered stdout logs. This guarantees clean diagnostic paths for automated performance parsers.

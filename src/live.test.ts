@@ -146,93 +146,127 @@ describe("F4 Guard Test: Token Summing", () => {
 
 describe("F6 Guard Test: Success Discriminates", () => {
   let buffer: Buffer;
-  let originalDoc: DocumentObject;
 
-  beforeAll(async () => {
-    // originalDoc is unused by the current criteria (all checks read the modified
-    // doc / companion paths); any valid doc serves as the baseline argument.
+  beforeAll(() => {
     buffer = fs.readFileSync(getGoldenDocxPath());
-    originalDoc = await DocumentObject.load(buffer);
   });
 
-  it("F6: form-fill requires every field filled and no placeholders left", async () => {
-    const passForm = await createStrippedDoc(
+  // SAFE-like body of comparable size for original vs filled, carrying the
+  // "Post-Money Valuation Cap" anchor the base-integrity check requires.
+  const SAFE_TEMPLATE =
+    "THIS CERTIFIES THAT in exchange for the payment by [Investor Name] of $[_____________] " +
+    "(the Purchase Amount) on [Date of Safe], [Company Name], a [State of Incorporation] corporation, " +
+    "issues to the Investor the right to certain shares of the Company's Capital Stock. " +
+    "The Post-Money Valuation Cap is $[_____________]. All rights and obligations are governed by the " +
+    "laws of the State of [Governing Law Jurisdiction]. IN WITNESS WHEREOF: [_name_], [_title_].";
+  const SAFE_FILLED =
+    "THIS CERTIFIES THAT in exchange for the payment by Vertex Seed Fund, L.P. of $500,000 " +
+    "(the Purchase Amount) on June 22, 2026, Acme Robotics, Inc., a Delaware corporation, " +
+    "issues to the Investor the right to certain shares of the Company's Capital Stock. " +
+    "The Post-Money Valuation Cap is $15,000,000. All rights and obligations are governed by the " +
+    "laws of the State of Delaware. IN WITNESS WHEREOF: John Carter, Chief Executive Officer.";
+
+  it("F6: form-fill — all fields filled, no placeholders, base intact", async () => {
+    const orig = await createStrippedDoc(buffer, SAFE_TEMPLATE);
+    const pass = await createStrippedDoc(buffer, SAFE_FILLED);
+    const fail = await createStrippedDoc(
       buffer,
-      "This Safe certifies that Acme Robotics, Inc., a Delaware corporation, issues to " +
-        "Vertex Seed Fund, L.P. of $500,000 (the Purchase Amount) on June 22, 2026. " +
-        "The Post-Money Valuation Cap is $15,000,000. Governed by the laws of Delaware. " +
-        "Signed: John Carter, Chief Executive Officer.",
+      SAFE_FILLED.replace("June 22, 2026", "[Date of Safe]"),
     );
-    // Missing nothing but a single bracketed placeholder left behind => fail.
-    const failForm = await createStrippedDoc(
-      buffer,
-      "This Safe certifies that Acme Robotics, Inc., a Delaware corporation, issues to " +
-        "Vertex Seed Fund, L.P. of $500,000 on [Date of Safe]. The Post-Money Valuation Cap " +
-        "is $15,000,000. Governed by Delaware. Signed: John Carter, Chief Executive Officer.",
-    );
-    expect(await checkScenarioSuccess("form-fill", originalDoc, passForm)).toBe(true);
-    expect(await checkScenarioSuccess("form-fill", originalDoc, failForm)).toBe(false);
+    expect(await checkScenarioSuccess("form-fill", orig, pass)).toBe(true);
+    expect(await checkScenarioSuccess("form-fill", orig, fail)).toBe(false);
   });
 
-  it("F6: party-swap requires all new parties and zero leftover prior parties", async () => {
-    const passParty = await createStrippedDoc(
+  it("F6: form-fill — fails the size floor when the doc is grossly truncated", async () => {
+    // Big original, tiny output that still has all values + the anchor: must fail
+    // because it retains far less than MIN_SIZE_RATIO of the original's length.
+    const orig = await createStrippedDoc(buffer, "Boilerplate SAFE body sentence. ".repeat(80));
+    const tiny = await createStrippedDoc(
       buffer,
-      "Between Wayne Enterprises, Inc. and Fox Capital Partners, L.P. Wayne Enterprises, Inc. " +
-        "issues to Fox Capital Partners, L.P. Signed Bruce Wayne. Wayne Enterprises, Inc. and " +
-        "Bruce Wayne and Bruce Wayne, bruce@wayne.enterprises.",
+      "Acme Robotics, Inc.; Delaware; Vertex Seed Fund, L.P.; $500,000; $15,000,000; " +
+        "June 22, 2026; John Carter; Chief Executive Officer; Post-Money Valuation Cap.",
     );
+    expect(await checkScenarioSuccess("form-fill", orig, tiny)).toBe(false);
+  });
+
+  it("F6: party-swap — all new parties, zero leftover prior parties, base intact", async () => {
+    const executed =
+      "This Series Seed Preferred Stock Investment Agreement is between Stark Industries, Inc. and " +
+      "Pym Particle Ventures, L.P. Stark Industries, Inc. issues shares to Pym Particle Ventures, L.P. " +
+      "The Key Holder is Anthony Stark. Notices to Stark Industries, Inc. and to Anthony Stark at " +
+      "anthony@starkindustries.com. Signed by Anthony Stark for Stark Industries, Inc.";
+    const swapped =
+      "This Series Seed Preferred Stock Investment Agreement is between Wayne Enterprises, Inc. and " +
+      "Fox Capital Partners, L.P. Wayne Enterprises, Inc. issues shares to Fox Capital Partners, L.P. " +
+      "The Key Holder is Bruce Wayne. Notices to Wayne Enterprises, Inc. and to Bruce Wayne at " +
+      "bruce@wayne.enterprises. Signed by Bruce Wayne for Wayne Enterprises, Inc.";
+    const orig = await createStrippedDoc(buffer, executed);
+    const pass = await createStrippedDoc(buffer, swapped);
     // A single leftover prior-party reference => fail, even with new parties present.
-    const failParty = await createStrippedDoc(
+    const fail = await createStrippedDoc(
       buffer,
-      "Between Wayne Enterprises, Inc. and Fox Capital Partners, L.P. Wayne Enterprises, Inc. " +
-        "issues to Fox Capital Partners, L.P. Signed Bruce Wayne, Bruce Wayne. " +
-        "Notice: Stark Industries, Inc. remains in the signature block.",
+      swapped + " (prior counsel: Stark Industries, Inc.)",
     );
-    expect(await checkScenarioSuccess("party-swap", originalDoc, passParty)).toBe(true);
-    expect(await checkScenarioSuccess("party-swap", originalDoc, failParty)).toBe(false);
+    expect(await checkScenarioSuccess("party-swap", orig, pass)).toBe(true);
+    expect(await checkScenarioSuccess("party-swap", orig, fail)).toBe(false);
   });
 
   it("F6: policy-checklist-review fails on an unreviewed document (no comments/redlines)", async () => {
-    // The pristine CSA carries no comments or tracked changes -> must not pass.
     const csa = await DocumentObject.load(
       fs.readFileSync("fixtures/common-paper/cloud-service-agreement.docx"),
     );
-    expect(await checkScenarioSuccess("policy-checklist-review", originalDoc, csa)).toBe(false);
+    expect(await checkScenarioSuccess("policy-checklist-review", csa, csa)).toBe(false);
   });
 
   it("F6: playbook-commenting fails on the seeded fixture before the model reviews it", async () => {
-    // The redlined fixture has the counterparty's 8%/statutory proposal but no 2%
-    // conforming counter-proposal yet, so it must not pass until the model reviews.
+    // Seed has the counterparty's 8%/statutory proposal but no conforming 2% counter.
     const seeded = await DocumentObject.load(
       fs.readFileSync("fixtures/uk-gov/model-services-contract-redlined.docx"),
     );
-    expect(await checkScenarioSuccess("playbook-commenting", originalDoc, seeded)).toBe(false);
+    expect(await checkScenarioSuccess("playbook-commenting", seeded, seeded)).toBe(false);
   });
 
-  it("F6: multi-file-assembly requires the values in BOTH the CSA and the DPA", async () => {
+  it("F6: multi-file — both docs carry the values AND the CSA stays a CSA", async () => {
     const tempFilePath = "./temp_test_live_scenario5.docx";
     const tempDpaPath = "./temp_test_live_scenario5_dpa.docx";
 
+    // DPA output must clear the size floor vs the ~24K DPA fixture and keep its
+    // DPA-unique "Processor" anchor, so bulk it past the threshold.
     const dpaDoc = await createStrippedDoc(
       buffer,
-      "Wayne Enterprises, Inc. and June 22, 2026 dpa details",
+      (
+        "Data Processing Agreement. The Processor processes Personal Data for the Customer. " +
+        "Customer: Wayne Enterprises, Inc. Effective Date: June 22, 2026. "
+      ).repeat(220),
     );
     fs.writeFileSync(tempDpaPath, await dpaDoc.save());
 
+    const origCsa = await createStrippedDoc(
+      buffer,
+      "Cloud Service Agreement. This Order Form and Cover Page set the Key Terms. The Subscription " +
+        "Period begins on the Effective Date. Customer: [enter name of Customer]. Effective Date: [Date]. " +
+        "General Cap Amount applies.",
+    );
     const passCsa = await createStrippedDoc(
       buffer,
-      "Wayne Enterprises, Inc. and June 22, 2026 csa details",
+      "Cloud Service Agreement. This Order Form and Cover Page set the Key Terms. The Subscription " +
+        "Period begins on the Effective Date. Customer: Wayne Enterprises, Inc. Effective Date: " +
+        "June 22, 2026. General Cap Amount applies.",
+    );
+    // Corruption: CSA slot overwritten with DPA-like content (no "Order Form"/"Subscription Period").
+    const corruptCsa = await createStrippedDoc(
+      buffer,
+      "Data Processing Agreement. The Processor handles Personal Data. Customer: Wayne Enterprises, " +
+        "Inc. Effective Date: June 22, 2026.",
     );
 
     try {
       expect(
-        await checkScenarioSuccess("multi-file-assembly", originalDoc, passCsa, tempFilePath),
+        await checkScenarioSuccess("multi-file-assembly", origCsa, passCsa, tempFilePath),
       ).toBe(true);
-
-      // DPA present but CSA missing the values => fail.
-      const failCsa = await createStrippedDoc(buffer, "Customer name and date are missing here");
+      // CSA overwritten with DPA content must FAIL the base-integrity invariant.
       expect(
-        await checkScenarioSuccess("multi-file-assembly", originalDoc, failCsa, tempFilePath),
+        await checkScenarioSuccess("multi-file-assembly", origCsa, corruptCsa, tempFilePath),
       ).toBe(false);
     } finally {
       if (fs.existsSync(tempDpaPath)) {

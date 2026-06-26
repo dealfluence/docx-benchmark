@@ -64,6 +64,33 @@ function addedReviewText(doc: DocumentObject): string {
   return parts.join(" \n ").toLowerCase();
 }
 
+/**
+ * Minimum fraction of the original document's text length the output must retain.
+ * Guards against a tool truncating the document or overwriting it with a smaller
+ * one (e.g. saving DPA bytes into the CSA slot). Every scenario only adds or
+ * swaps content, so a legitimate output is never substantially smaller.
+ */
+const MIN_SIZE_RATIO = 0.7;
+
+/**
+ * Base-integrity invariant: the output must still be the original document with the
+ * task applied on top — at least MIN_SIZE_RATIO of its text length must remain, and
+ * every distinctive `anchors` substring (structural content the task does not
+ * remove) must still be present. Catches truncation, overwrite-with-another-doc,
+ * and wholesale replacement that a value-presence check alone would miss.
+ */
+function baseIntact(
+  originalDoc: DocumentObject,
+  modifiedDoc: DocumentObject,
+  anchors: string[],
+  minRatio = MIN_SIZE_RATIO,
+): boolean {
+  const orig = plainText(originalDoc);
+  const mod = plainText(modifiedDoc);
+  if (orig.length > 0 && mod.length < orig.length * minRatio) return false;
+  return anchors.every((a) => hasNorm(mod, a));
+}
+
 export async function checkScenarioSuccess(
   scenarioId: string,
   originalDoc: DocumentObject,
@@ -101,7 +128,12 @@ export async function checkScenarioSuccess(
       const noDollarBlanks = !/\$\[_+\]/.test(m);
 
       return (
-        hasAllValues && hasPurchaseAmount && hasValuationCap && noPlaceholders && noDollarBlanks
+        hasAllValues &&
+        hasPurchaseAmount &&
+        hasValuationCap &&
+        noPlaceholders &&
+        noDollarBlanks &&
+        baseIntact(originalDoc, modifiedDoc, ["Post-Money Valuation Cap"])
       );
     }
 
@@ -126,7 +158,11 @@ export async function checkScenarioSuccess(
         countLiteral(nm, normalize("Fox Capital Partners")) >= 2 &&
         countLiteral(nm, normalize("Bruce Wayne")) >= 3;
 
-      return noOldParties && consistentParties;
+      return (
+        noOldParties &&
+        consistentParties &&
+        baseIntact(originalDoc, modifiedDoc, ["Series Seed Preferred Stock"])
+      );
     }
 
     case "policy-checklist-review": {
@@ -165,7 +201,12 @@ export async function checkScenarioSuccess(
         review.includes("common paper") ||
         review.includes("commonpaper");
 
-      return governingLawFlagged && liabilityAddressed && standardTermsAddressed;
+      return (
+        governingLawFlagged &&
+        liabilityAddressed &&
+        standardTermsAddressed &&
+        baseIntact(originalDoc, modifiedDoc, ["Order Form", "Subscription Period"])
+      );
     }
 
     case "playbook-commenting": {
@@ -187,7 +228,12 @@ export async function checkScenarioSuccess(
         review.includes("late payment") ||
         review.includes("statutory");
 
-      return proposesTwoPercent && referencesBaseRate && onTopic;
+      return (
+        proposesTwoPercent &&
+        referencesBaseRate &&
+        onTopic &&
+        baseIntact(originalDoc, modifiedDoc, ["the Authority", "the Supplier"])
+      );
     }
 
     case "multi-file-assembly": {
@@ -208,12 +254,35 @@ export async function checkScenarioSuccess(
         const customer = "Wayne Enterprises, Inc.";
         const effectiveDate = "June 22, 2026";
 
-        return (
+        const valuesOk =
           hasNorm(csaPlain, customer) &&
           hasNorm(dpaPlain, customer) &&
           hasNorm(csaPlain, effectiveDate) &&
-          hasNorm(dpaPlain, effectiveDate)
-        );
+          hasNorm(dpaPlain, effectiveDate);
+
+        // Base-integrity: the CSA must still be the CSA (not overwritten with DPA
+        // bytes or another doc) — CSA-unique anchors present + size floor vs the
+        // original CSA. "Order Form"/"Subscription Period" appear only in the CSA,
+        // never the DPA, so a CSA-as-DPA overwrite fails here.
+        const csaIntact = baseIntact(originalDoc, modifiedDoc, [
+          "Order Form",
+          "Subscription Period",
+        ]);
+
+        // The DPA must still be the DPA ("Processor" is DPA-unique) and not have
+        // been shrunk/overwritten — size floor vs the original DPA fixture.
+        let dpaSizeOk = true;
+        try {
+          const dpaOrig = await DocumentObject.load(
+            fs.readFileSync(path.resolve("fixtures/common-paper/dpa-module.docx")),
+          );
+          dpaSizeOk = dpaPlain.length >= plainText(dpaOrig).length * MIN_SIZE_RATIO;
+        } catch {
+          // Original DPA baseline unavailable — skip the DPA size floor.
+        }
+        const dpaIntact = hasNorm(dpaPlain, "Processor") && dpaSizeOk;
+
+        return valuesOk && csaIntact && dpaIntact;
       } catch (err) {
         console.error("Error verifying DPA in success criteria:", err);
         return false;
