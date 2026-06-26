@@ -91,6 +91,15 @@ function baseIntact(
   return anchors.every((a) => hasNorm(mod, a));
 }
 
+/** Raw text of all comment parts (lowercased) — reliable for checking a specific comment survived. */
+function rawCommentsText(doc: DocumentObject): string {
+  return doc.pkg.parts
+    .filter((p) => p.partname.includes("comments"))
+    .map((p) => String(p.blob))
+    .join("\n")
+    .toLowerCase();
+}
+
 export async function checkScenarioSuccess(
   scenarioId: string,
   originalDoc: DocumentObject,
@@ -228,10 +237,18 @@ export async function checkScenarioSuccess(
         review.includes("late payment") ||
         review.includes("statutory");
 
+      // Negotiation invariant: the reviewer must engage the counterparty ON TOP of
+      // their comment, not by deleting it. The seed counterparty comment (authored
+      // "Supplier's Counsel") contains the distinctive phrase "robust protection";
+      // it must still be present in the output. Rejecting their tracked *change* is
+      // fair game, but discarding their comment is not.
+      const counterpartyCommentKept = rawCommentsText(modifiedDoc).includes("robust protection");
+
       return (
         proposesTwoPercent &&
         referencesBaseRate &&
         onTopic &&
+        counterpartyCommentKept &&
         baseIntact(originalDoc, modifiedDoc, ["the Authority", "the Supplier"])
       );
     }

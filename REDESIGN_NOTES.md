@@ -200,8 +200,18 @@ in `success.ts`:
 This directly closes the multi-file false positive: re-evaluating the last run's
 preserved outputs, **safe-docx/multi-file flips PASS -> FAIL** (its CSA was
 overwritten with DPA bytes — fails the "Order Form" anchor and the size floor),
-while every legitimate pass is unchanged. (Note: the playbook lenient-comment
-blind spot from CASE_ANALYSIS.md §4 is NOT yet addressed — see follow-ups.)
+while every legitimate pass is unchanged.
+
+### Negotiation invariant (playbook) — counterparty comment must survive
+
+Closes the CASE_ANALYSIS.md §4 blind spot. The playbook gate now also requires the
+counterparty's comment to be PRESERVED in the output (review-on-top, not destructive
+replacement): the seed comment authored "Supplier's Counsel" carries the distinctive
+phrase "robust protection", which must still appear in the output's comment parts
+(`rawCommentsText`). Rejecting their tracked *change* is fair negotiation; deleting
+their *comment* now fails the case. Re-evaluating the last run, both tools preserved
+it (no false-fail); a tool that discards the counterparty comment will now fail even
+if it proposes the conforming 2% cap.
 
 ## Possible follow-ups
 - `fidelity.ts` still has a dead `negotiation-cleanup` branch (no such scenario) —
