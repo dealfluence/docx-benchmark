@@ -39,6 +39,7 @@ export interface LoopResult {
   newContentTokens?: number;
   tempFilePath?: string;
   completeTaskCalls?: number;
+  rateLimitCount?: number;
 }
 
 export interface LoopStats {
@@ -56,6 +57,7 @@ export interface LoopStats {
   recoveryTurns: number;
   completeTaskCalls: number;
   previousTurnHadError: boolean;
+  rateLimitCount: number;
   success: boolean;
 }
 
@@ -244,6 +246,7 @@ async function generateContentWithRetry(
   systemPrompt: string,
   tools: FunctionDeclaration[],
   maxRetries = 3,
+  onRateLimit?: () => void,
 ): Promise<GenerateContentResponse> {
   let attempt = 0;
   let delay = 2000;
@@ -278,6 +281,10 @@ async function generateContentWithRetry(
         (typeof errorObj?.status === "number" && errorObj.status >= 500) ||
         errorMessage.includes("500");
 
+      if (isRateLimit) {
+        onRateLimit?.();
+      }
+
       if (attempt >= maxRetries || (!isAbort && !isRateLimit && !isServerError)) {
         throw err;
       }
@@ -308,6 +315,7 @@ export function initLoopStats(config: LoopConfig): LoopStats {
     recoveryTurns: 0,
     completeTaskCalls: 0,
     previousTurnHadError: false,
+    rateLimitCount: 0,
     success: false,
   };
 }
@@ -337,6 +345,11 @@ export async function executeThinkStep(
     contents,
     `${config.systemPrompt}\n\n${THINK_ALOUD_SUFFIX}`,
     config.tools,
+    3,
+    () => {
+      stats.rateLimitCount = (stats.rateLimitCount || 0) + 1;
+      logWarn(prefix, `🚨 RATE LIMIT (429) encountered during planning step!`);
+    },
   ).catch((err) => {
     logError(prefix, `think-aloud generateContent failed or was aborted!`, err);
     throw err;
@@ -422,6 +435,11 @@ export async function executeTurn(
     contents,
     config.systemPrompt,
     config.tools,
+    3,
+    () => {
+      stats.rateLimitCount = (stats.rateLimitCount || 0) + 1;
+      logWarn(prefix, `🚨 RATE LIMIT (429) encountered during execution turn!`);
+    },
   ).catch((err) => {
     logError(prefix, `generateContent failed or was aborted!`, err);
     throw err;
@@ -695,6 +713,7 @@ async function handleCompleteTaskCall(
       `[complete_task] Validation gate FAILED. Rejecting submission with linter feedback.`,
     );
     currentTurnHadError = true;
+    shouldExitSucceeded = true;
     functionResponse = {
       name: toolName,
       response: {

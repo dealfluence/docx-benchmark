@@ -49,7 +49,7 @@ const getFlagReps = () => {
   }
 };
 const isQuick = process.argv.includes("--quick");
-let reps = getFlagReps() ?? getEnvReps() ?? (isQuick ? 1 : 5);
+let reps = getFlagReps() ?? getEnvReps() ?? (isQuick ? 1 : 15);
 
 // When enabled, each action step is preceded by a tools-disabled "think aloud"
 // planning step (see runAgenticLoop). Toggle via --think-aloud or BENCHMARK_THINK_ALOUD.
@@ -72,7 +72,7 @@ const getConcurrency = (): number => {
     ? parseInt(process.env.BENCHMARK_CONCURRENCY, 10)
     : NaN;
   if (!isNaN(envVal) && envVal > 0) return envVal;
-  return 10;
+  return 15;
 };
 
 // Model names config
@@ -178,6 +178,7 @@ async function runSingleTrial(plan: TrialPlan): Promise<TrialOutcome> {
       let historyTokensVal = 0;
       let newContentTokensVal = 0;
       let completeTaskCallsVal = 0;
+      let rateLimitCountVal = 0;
 
       let finalDoc: DocumentObject | null = null;
       let loopResTempFilePath: string | undefined = undefined;
@@ -208,6 +209,7 @@ async function runSingleTrial(plan: TrialPlan): Promise<TrialOutcome> {
         historyTokensVal = loopRes.historyTokens || 0;
         newContentTokensVal = loopRes.newContentTokens || 0;
         completeTaskCallsVal = loopRes.completeTaskCalls || 0;
+        rateLimitCountVal = loopRes.rateLimitCount || 0;
 
         if (loopRes.finalBuffer) {
           finalDoc = await DocumentObject.load(loopRes.finalBuffer);
@@ -280,6 +282,7 @@ async function runSingleTrial(plan: TrialPlan): Promise<TrialOutcome> {
         historyTokens: historyTokensVal,
         newContentTokens: newContentTokensVal,
         completeTaskCalls: completeTaskCallsVal,
+        rateLimitCount: rateLimitCountVal,
       };
     },
   );
@@ -308,6 +311,7 @@ function errorTrial(rep: number, latencyMs: number, error: string): SingleTrialR
     historyTokens: 0,
     newContentTokens: 0,
     completeTaskCalls: 0,
+    rateLimitCount: 0,
     error,
   };
 }
@@ -369,6 +373,8 @@ function summarizeTrials(
   trials: SingleTrialRun[],
 ): LiveTrialSummary {
   const repCount = trials.length;
+  const passingTrials = trials.filter((t) => t.success);
+  const rateLimitCount = trials.reduce((acc, t) => acc + (t.rateLimitCount || 0), 0);
   return {
     provider,
     model,
@@ -386,7 +392,7 @@ function summarizeTrials(
     xmlDelta: getStats(trials.map((t) => t.xmlDelta)),
     xmlIntegrityRate: `${trials.filter((t) => t.xmlIntegrity === "PASS").length}/${repCount}`,
     fidelity: getStats(trials.map((t) => t.fidelity)),
-    successRate: `${trials.filter((t) => t.success).length}/${repCount}`,
+    successRate: `${passingTrials.length}/${repCount}`,
     roundTrips: getStats(trials.map((t) => t.roundTrips)),
     turnsToSuccess: getStats(trials.map((t) => t.turnsToSuccess)),
     recoveryRate: getStats(trials.map((t) => t.recoveryRate)),
@@ -395,6 +401,12 @@ function summarizeTrials(
     schemaTokens: getStats(trials.map((t) => t.schemaTokens)),
     historyTokens: getStats(trials.map((t) => t.historyTokens)),
     newContentTokens: getStats(trials.map((t) => t.newContentTokens)),
+    rateLimitCount,
+
+    passingSteps: getStats(passingTrials.map((t) => t.turnsToSuccess)),
+    passingTokensIn: getStats(passingTrials.map((t) => t.tokensIn)),
+    passingTokensOut: getStats(passingTrials.map((t) => t.tokensOut)),
+    passingTokensTotal: getStats(passingTrials.map((t) => t.tokensIn + t.tokensOut)),
   };
 }
 
