@@ -419,7 +419,7 @@ export function buildHtml(summaries: LiveTrialSummary[], reps: number): string {
 
       tr.innerHTML = \`
         <td class="px-6 py-4 font-medium text-gray-900">\${row.tool}</td>
-        <td class="px-6 py-4 text-gray-600">\&lt;code\&gt;\${row.scenarioId}\&lt;/code\&gt;</td>
+        <td class="px-6 py-4 text-gray-600"><code>\${row.scenarioId}</code></td>
         <td class="px-6 py-4 text-center">
           <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium \${successColor}">
             \${row.successRate}
@@ -427,10 +427,10 @@ export function buildHtml(summaries: LiveTrialSummary[], reps: number): string {
         </td>
         <td class="px-6 py-4 text-center text-gray-700">\${row.fidelity.mean.toFixed(1)}%</td>
         <td class="px-6 py-4 text-center text-gray-700">\${Math.round(row.xmlDelta.mean)}</td>
-        <td class="px-6 py-4 text-center text-gray-600">\&lt;span class="font-semibold text-slate-900"\&gt;\${stepsMean}\&lt;/span\&gt;</td>
+        <td class="px-6 py-4 text-center text-gray-600"><span class="font-semibold text-slate-900">\${stepsMean}</span></td>
         <td class="px-6 py-4 text-center text-gray-600 font-medium">\${stepsMedian}</td>
         <td class="px-6 py-4 text-right text-gray-600 font-semibold text-slate-900">\${tokensMean}</td>
-        <td class="px-6 py-4 text-right text-gray-600 font-medium">\&lt;span class="font-semibold text-slate-900"\&gt;\${tokensMedian}\&lt;/span\&gt;</td>
+        <td class="px-6 py-4 text-right text-gray-600 font-medium"><span class="font-semibold text-slate-900">\${tokensMedian}</span></td>
       \`;
       tbody.appendChild(tr);
     });
