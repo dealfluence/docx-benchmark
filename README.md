@@ -75,6 +75,35 @@ The tools the benchmark runs are declared in [`benchmark.tools.json`](benchmark.
 - **`displayName`**: the label shown to the model (defaults to the tool id).
 - **`argDefaults`** *(optional)*: per-tool-name argument defaults merged into every matching MCP call — useful for tool-specific quirks without code changes.
 
+### Filesystem-sandboxed servers
+
+Each trial copies the test documents into an isolated session directory under
+`./temp/session_*`, and every tool is expected to read and write there. Most MCP
+servers operate on whatever path they're handed, so this is transparent.
+
+Some servers, however, enforce their own filesystem sandbox and will refuse to
+touch paths outside an allow-list (you'll see a `PATH_NOT_ALLOWED`-style error in
+the logs). Granting such a server access to the benchmark's working directory is
+**the tool's own setup responsibility**, handled through its `env` block — the
+same place any other server-specific environment goes.
+
+Point the server's allow-list env var at the benchmark's `temp` directory (the
+stable parent of every per-trial session dir). For example, `safe-docx` reads
+`SAFE_DOCX_ALLOWED_ROOTS`:
+
+```json
+"safe-docx": {
+  "command": "npx",
+  "args": ["-y", "@usejunior/safe-docx"],
+  "env": { "SAFE_DOCX_ALLOWED_ROOTS": "/absolute/path/to/this/repo/temp" },
+  "argDefaults": { "save": { "allow_overwrite": true } }
+}
+```
+
+Use the absolute path to *your* checkout's `temp` directory. The benchmark does
+not inject this for you — it stays vendor-neutral and makes no assumptions about
+which servers sandbox paths or what their env vars are called.
+
 To benchmark **your own** MCP server, add an entry here and run the suite — no code changes required. Point at a different file with `--tools <path>` or the `BENCHMARK_TOOLS` env var. If no config file exists, the suite falls back to the bundled `adeu` + `safe-docx` defaults.
 
 ### Comparing local dev builds vs. published versions
