@@ -817,6 +817,47 @@ export const mapToGeminiTools = (tools: McpTool[]): FunctionDeclaration[] =>
  * filename argument pointing to a .docx file so that it resolves within our isolated session folder,
  * guaranteeing complete safety for the master baseline fixtures.
  */
+
+/**
+ * Normalizes a model-supplied path/filename so common LLM malformations still
+ * resolve to a real file. The model frequently emits paths with trailing
+ * whitespace, wrapping or stray quotes, a trailing dot ("file.docx."), markdown
+ * backticks, or a leading "./" — none of which change the intended file but all
+ * of which break a naive ".docx" suffix test or basename resolution.
+ *
+ * Returns the cleaned string. If after cleaning it does not look like a .docx
+ * reference, the original is returned untouched (caller decides what to do).
+ */
+export function sanitizeDocxArg(raw: string): { cleaned: string; isDocx: boolean } {
+  let s = raw.trim();
+
+  // Strip wrapping or stray quotes/backticks the model sometimes includes.
+  s = s.replace(/^['"`]+/, "").replace(/['"`]+$/, "");
+
+  // Strip trailing punctuation/whitespace the model appends to filenames
+  // (e.g. "file.docx.", "file.docx ", "file.docx,"). Done in a loop so a
+  // combination like 'file.docx ".' is fully peeled.
+  let prev: string;
+  do {
+    prev = s;
+    s = s.trim();
+    s = s.replace(/[.,;:]+$/, ""); // trailing sentence/list punctuation
+    s = s.replace(/^['"`]+/, "").replace(/['"`]+$/, ""); // re-check quotes exposed by trimming
+  } while (s !== prev);
+
+  // Drop a leading "./" so basename resolution is unaffected by it.
+  s = s.replace(/^\.\//, "");
+
+  const isDocx = s.toLowerCase().endsWith(".docx");
+  return { cleaned: s, isDocx };
+}
+
+/**
+ * Universal Path Isolation Guard: Automatically translates any file path or relative
+ * filename argument pointing to a .docx file so that it resolves within our isolated session folder,
+ * guaranteeing complete safety for the master baseline fixtures. Tolerates common
+ * model path malformations (trailing whitespace/dots, wrapping quotes) via sanitizeDocxArg.
+ */
 export function resolveArgsToSessionDir(
   args: Record<string, unknown>,
   sessionDir: string,
@@ -825,8 +866,9 @@ export function resolveArgsToSessionDir(
   for (const key of Object.keys(resolvedArgs)) {
     const val = resolvedArgs[key];
     if (typeof val === "string") {
-      if (val.toLowerCase().endsWith(".docx")) {
-        const baseName = path.basename(val);
+      const { cleaned, isDocx } = sanitizeDocxArg(val);
+      if (isDocx) {
+        const baseName = path.basename(cleaned);
         resolvedArgs[key] = path.join(sessionDir, baseName).replace(/\\/g, "/");
       }
     }
@@ -947,10 +989,17 @@ export async function runToolLoop(
       clientName: tool.id,
     }),
     checkSuccess: async (turn, finalFilenames) => {
+      // FILE: src/loops.ts
+
       let primaryPath = tempFilePath;
       if (finalFilenames && finalFilenames.length > 0) {
         for (const filename of finalFilenames) {
-          const base = path.basename(filename);
+          // The model frequently malforms these (trailing dot/space, wrapping
+          // quotes), so normalize before resolving — same cleanup the executor's
+          // path guard applies. Fall back to the raw basename if it didn't parse
+          // as a .docx so we never drop a usable name.
+          const { cleaned, isDocx } = sanitizeDocxArg(filename);
+          const base = path.basename(isDocx ? cleaned : filename);
           const resolvedPath = path.join(sessionDir, base).replace(/\\/g, "/");
           if (!fs.existsSync(resolvedPath)) {
             continue;
