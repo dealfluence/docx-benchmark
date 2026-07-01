@@ -1004,9 +1004,13 @@ export async function runToolLoop(
           if (!fs.existsSync(resolvedPath)) {
             continue;
           }
-          if (base.toLowerCase().includes("dpa") && base !== "dpa-module.docx") {
-            const stdDpaPath = path.join(sessionDir, "dpa-module.docx").replace(/\\/g, "/");
-            fs.copyFileSync(resolvedPath, stdDpaPath);
+          if (base.toLowerCase().includes("dpa")) {
+            if (base !== "dpa-module.docx") {
+              const stdDpaPath = path.join(sessionDir, "dpa-module.docx").replace(/\\/g, "/");
+              fs.copyFileSync(resolvedPath, stdDpaPath);
+            }
+            // else: already at the standard DPA path the gate looks for — leave it,
+            // and crucially do NOT let it become primaryPath.
           } else {
             primaryPath = resolvedPath;
           }
